@@ -5,13 +5,28 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, inline_serializer
+from rest_framework import serializers
 
 from accounts.permissions import IsOrganizer
 from config.exceptions import state_error_response
 from events.filters import filter_events
 from events.models import Event
-from events.serializers import EventReadSerializer, EventWriteSerializer
+from events.serializers import CancelEventSerializer, EventReadSerializer, EventWriteSerializer
 from registrations.services import RegistrationRuleError, apply_event_edit, cancel_event
+
+
+def event_page_schema():
+    """Describes a paged event response."""
+    return inline_serializer(
+        name="EventListPageResponse",
+        fields={
+            "count": serializers.IntegerField(),
+            "next": serializers.URLField(allow_null=True),
+            "previous": serializers.URLField(allow_null=True),
+            "results": EventReadSerializer(many=True),
+        },
+    )
 
 
 def event_error(code):
@@ -41,9 +56,31 @@ class EventListCreateView(APIView):
             return [IsAuthenticated(), IsOrganizer()]
         return [AllowAny()]
 
+    @extend_schema(
+        summary="List and filter upcoming events",
+        operation_id="events_list",
+        parameters=[
+            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY),
+            OpenApiParameter("q", OpenApiTypes.STR, OpenApiParameter.QUERY),
+            OpenApiParameter("city", OpenApiTypes.STR, OpenApiParameter.QUERY),
+            OpenApiParameter("category", OpenApiTypes.STR, OpenApiParameter.QUERY),
+            OpenApiParameter("event_type", OpenApiTypes.STR, OpenApiParameter.QUERY),
+            OpenApiParameter("status", OpenApiTypes.STR, OpenApiParameter.QUERY),
+            OpenApiParameter("starts_after", OpenApiTypes.DATE, OpenApiParameter.QUERY),
+            OpenApiParameter("starts_before", OpenApiTypes.DATE, OpenApiParameter.QUERY),
+        ],
+        responses={200: event_page_schema()},
+        auth=[],
+    )
     def get(self, request):
         return paginated_response(request, filter_events(request.query_params), self)
 
+    @extend_schema(
+        summary="Create an event",
+        request=EventWriteSerializer,
+        responses={201: EventReadSerializer},
+        auth=[{"BearerAuth": []}],
+    )
     def post(self, request):
         serializer = EventWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -66,6 +103,12 @@ class EventDetailView(APIView):
             return [IsAuthenticated(), IsOrganizer()]
         return [AllowAny()]
 
+    @extend_schema(
+        summary="Get event details",
+        operation_id="events_retrieve",
+        responses={200: EventReadSerializer},
+        auth=[],
+    )
     def get(self, request, pk):
         event = get_object_or_404(
             Event.objects.select_related("organizer"),
@@ -73,6 +116,12 @@ class EventDetailView(APIView):
         )
         return Response(EventReadSerializer(event).data)
 
+    @extend_schema(
+        summary="Edit an event",
+        request=EventWriteSerializer,
+        responses={200: EventReadSerializer},
+        auth=[{"BearerAuth": []}],
+    )
     def patch(self, request, pk):
         event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
         if event.organizer_id != request.user.pk:
@@ -97,6 +146,12 @@ class CancelEventView(APIView):
             return [IsAuthenticated(), IsOrganizer()]
         return [IsAuthenticated()]
 
+    @extend_schema(
+        summary="Cancel an event",
+        request=CancelEventSerializer,
+        responses={200: EventReadSerializer},
+        auth=[{"BearerAuth": []}],
+    )
     def post(self, request, pk):
         event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
         if event.organizer_id != request.user.pk:
@@ -122,6 +177,21 @@ class MyEventsView(APIView):
             raise exceptions.MethodNotAllowed(request.method)
         super().initial(request, *args, **kwargs)
 
+    @extend_schema(
+        summary="List events owned by the organizer",
+        operation_id="my_events_list",
+        parameters=[OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY)],
+        responses={200: inline_serializer(
+            name="MyEventsPageResponse",
+            fields={
+                "count": serializers.IntegerField(),
+                "next": serializers.URLField(allow_null=True),
+                "previous": serializers.URLField(allow_null=True),
+                "results": EventReadSerializer(many=True),
+            },
+        )},
+        auth=[{"BearerAuth": []}],
+    )
     def get(self, request):
         queryset = Event.objects.filter(organizer=request.user).select_related(
             "organizer"

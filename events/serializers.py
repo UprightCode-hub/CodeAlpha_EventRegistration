@@ -161,5 +161,5 @@ class EventReadSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
-    def get_seats_left(self, event):
+    def get_seats_left(self, event) -> int:
         return max(event.capacity - event.registered_count, 0)

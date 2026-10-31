@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "drf_spectacular",
     "accounts",
     "events",
     "registrations",
@@ -95,6 +96,35 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Event Registration API",
+    "DESCRIPTION": "API for event registration and attendee notifications.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+            }
+        }
+    },
+    "ENUM_NAME_OVERRIDES": {
+        "EventStatusEnum": [
+            ("scheduled", "Scheduled"),
+            ("cancelled", "Cancelled"),
+        ],
+        "RegistrationStatusEnum": [
+            ("registered", "Registered"),
+            ("waitlisted", "Waitlisted"),
+            ("cancelled", "Cancelled"),
+            ("event_cancelled", "Event cancelled"),
+        ],
+    },
 }
 
 SIMPLE_JWT = {

@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.http import HttpResponseRedirect
 from django.urls import include, path, re_path
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from rest_framework.permissions import AllowAny
 
 from config.exceptions import json_not_found
 from events.views import MyEventsView
@@ -28,5 +30,17 @@ urlpatterns = [
         name="event-registrations",
     ),
     path("api/my/events/", MyEventsView.as_view(), name="my-events"),
+    path(
+        "api/schema/",
+        SpectacularAPIView.as_view(permission_classes=[AllowAny]),
+        name="schema",
+    ),
+    path(
+        "api/docs/",
+        SpectacularSwaggerView.as_view(
+            url_name="schema", permission_classes=[AllowAny]
+        ),
+        name="swagger-ui",
+    ),
     re_path(r"^.*$", json_not_found),  # The catch-all would otherwise swallow the admin redirect.
 ]

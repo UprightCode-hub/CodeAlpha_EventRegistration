@@ -1,8 +1,13 @@
 import logging
 
-from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+from django.core.exceptions import (
+    BadRequest,
+    PermissionDenied as DjangoPermissionDenied,
+    SuspiciousOperation,
+)
 from django.http import Http404
 from django.http import JsonResponse
+from django.http.multipartparser import MultiPartParserError
 from rest_framework import exceptions as drf_exceptions, status
 from rest_framework.views import exception_handler
 
@@ -95,6 +100,11 @@ class JsonExceptionMiddleware:
         return self.get_response(request)
 
     def process_exception(self, request, exception):
+        if isinstance(
+            exception,
+            (Http404, DjangoPermissionDenied, SuspiciousOperation, BadRequest, MultiPartParserError),
+        ):
+            return None
         logger.error(
             "Unhandled exception while processing request",
             exc_info=(type(exception), exception, exception.__traceback__),

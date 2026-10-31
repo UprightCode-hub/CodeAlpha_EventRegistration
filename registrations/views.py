@@ -4,6 +4,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, inline_serializer
 
 from accounts.permissions import IsAttendee, IsOrganizer
 from config.exceptions import error_response, state_error_response
@@ -21,6 +22,19 @@ from registrations.services import (
     cancel_registration,
     register_attendee,
 )
+
+
+def page_schema(name, item_serializer):
+    """Describes a page envelope around the supplied response item."""
+    return inline_serializer(
+        name=name,
+        fields={
+            "count": serializers.IntegerField(),
+            "next": serializers.URLField(allow_null=True),
+            "previous": serializers.URLField(allow_null=True),
+            "results": item_serializer(many=True),
+        },
+    )
 
 
 def paginated_response(request, queryset, view, serializer_class):
@@ -45,6 +59,12 @@ class RegistrationListCreateView(APIView):
             return [IsAuthenticated(), IsAttendee()]
         return [IsAuthenticated()]
 
+    @extend_schema(
+        summary="Create an attendee registration",
+        request=RegistrationRequestSerializer,
+        responses={201: RegistrationReadSerializer},
+        auth=[{"BearerAuth": []}],
+    )
     def post(self, request):
         serializer = RegistrationRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -66,6 +86,18 @@ class RegistrationListCreateView(APIView):
         )
         return Response(RegistrationReadSerializer(item).data, status=201)
 
+    @extend_schema(
+        summary="List the attendee's registrations",
+        operation_id="registrations_list",
+        parameters=[
+            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY),
+            OpenApiParameter("status", OpenApiTypes.STR, OpenApiParameter.QUERY),
+        ],
+        responses={
+            200: page_schema("RegistrationPageResponse", RegistrationReadSerializer)
+        },
+        auth=[{"BearerAuth": []}],
+    )
     def get(self, request):
         status_value = request.query_params.get("status")
         valid_statuses = Registration.Status.values
@@ -90,6 +122,12 @@ class RegistrationDetailView(APIView):
             return [IsAuthenticated(), IsAttendee()]
         return [IsAuthenticated()]
 
+    @extend_schema(
+        summary="Get an attendee registration",
+        operation_id="registrations_retrieve",
+        responses={200: RegistrationReadSerializer},
+        auth=[{"BearerAuth": []}],
+    )
     def get(self, request, pk):
         queryset = with_waitlist_position(
             Registration.objects.filter(attendee=request.user).select_related(
@@ -110,6 +148,12 @@ class RegistrationCancelView(APIView):
             return [IsAuthenticated(), IsAttendee()]
         return [IsAuthenticated()]
 
+    @extend_schema(
+        summary="Cancel an attendee registration",
+        request=None,
+        responses={200: RegistrationReadSerializer},
+        auth=[{"BearerAuth": []}],
+    )
     def post(self, request, pk):
         try:
             registration = Registration.objects.get(pk=pk, attendee=request.user)
@@ -136,6 +180,14 @@ class NotificationListView(APIView):
     def get_permissions(self):
         return [IsAuthenticated()]
 
+    @extend_schema(
+        summary="List the signed-in user's notifications",
+        parameters=[OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY)],
+        responses={
+            200: page_schema("NotificationPageResponse", NotificationReadSerializer)
+        },
+        auth=[{"BearerAuth": []}],
+    )
     def get(self, request):
         queryset = Notification.objects.filter(recipient=request.user).select_related(
             "event", "registration"
@@ -153,6 +205,16 @@ class OrganizerRegistrationListView(APIView):
             return [IsAuthenticated(), IsOrganizer()]
         return [IsAuthenticated()]
 
+    @extend_schema(
+        summary="List registrations for an owned event",
+        parameters=[OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY)],
+        responses={
+            200: page_schema(
+                "OrganizerRegistrationPageResponse", OrganizerRegistrationReadSerializer
+            )
+        },
+        auth=[{"BearerAuth": []}],
+    )
     def get(self, request, pk):
         event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
         if event.organizer_id != request.user.pk:
