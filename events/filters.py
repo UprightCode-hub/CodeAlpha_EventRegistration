@@ -1,7 +1,7 @@
 from datetime import date
 import re
 
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -51,8 +51,14 @@ def filter_events(params):
     if errors:
         raise serializers.ValidationError(errors)
 
-    # Registration count annotations will be added here when registrations are available.
-    queryset = Event.objects.select_related("organizer")
+    queryset = Event.objects.select_related("organizer").annotate(
+        registered_total=Count(
+            "registrations", filter=Q(registrations__status="registered")
+        ),
+        waitlist_total=Count(
+            "registrations", filter=Q(registrations__status="waitlisted")
+        ),
+    )
     if status_value == Event.Status.CANCELLED:
         queryset = queryset.filter(status=Event.Status.CANCELLED)
     else:

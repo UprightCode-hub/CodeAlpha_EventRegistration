@@ -61,10 +61,12 @@ class Event(models.Model):
 
     @property
     def registered_count(self):
-        # Registrations will provide the real attendee count when that app is added.
-        return 0
+        if "registered_total" in self.__dict__:
+            return self.registered_total
+        return self.registrations.filter(status="registered").count()
 
     @property
     def waitlist_count(self):
-        # Registrations will provide the real waitlist count when that app is added.
-        return 0
+        if "waitlist_total" in self.__dict__:
+            return self.waitlist_total
+        return self.registrations.filter(status="waitlisted").count()

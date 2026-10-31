@@ -1,3 +1,4 @@
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import exceptions, status
@@ -115,6 +116,13 @@ class MyEventsView(APIView):
     def get(self, request):
         queryset = Event.objects.filter(organizer=request.user).select_related(
             "organizer"
+        ).annotate(
+            registered_total=Count(
+                "registrations", filter=Q(registrations__status="registered")
+            ),
+            waitlist_total=Count(
+                "registrations", filter=Q(registrations__status="waitlisted")
+            ),
         )
         queryset = queryset.order_by("-start_at", "-id")
         return paginated_response(request, queryset, self)
