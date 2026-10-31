@@ -8,23 +8,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsOrganizer
+from config.exceptions import state_error_response
 from events.filters import filter_events
 from events.models import Event
 from events.serializers import EventReadSerializer, EventWriteSerializer
 
 
-EVENT_ERRORS = {
-    "event_started": "This event has already started.",
-    "event_cancelled": "This event has been cancelled.",
-}
-
-
 def event_error(code):
     """Builds a fixed response for event state errors."""
-    return Response(
-        {"error": {"code": code, "message": EVENT_ERRORS[code]}},
-        status=status.HTTP_400_BAD_REQUEST,
-    )
+    return state_error_response(code)
 
 
 def paginated_response(request, queryset, view):

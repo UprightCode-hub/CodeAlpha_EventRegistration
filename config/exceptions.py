@@ -17,6 +17,15 @@ ERRORS = {
     "server_error": (500, "Something went wrong on the server."),
 }
 
+STATE_ERRORS = {
+    "event_started": "This event has already started.",
+    "event_cancelled": "This event has been cancelled.",
+    "registration_closed": "Registration for this event is closed.",
+    "already_registered": "You already have an open registration for this event.",
+    "already_cancelled": "This registration is already cancelled.",
+    "capacity_too_low": "Capacity cannot be lower than the number of registered attendees.",
+}
+
 
 def error_response(code, fields=None):
     """Builds a response using the public API error format."""
@@ -25,6 +34,14 @@ def error_response(code, fields=None):
     if code == "validation_error":
         error["fields"] = fields or {}
     return JsonResponse({"error": error}, status=http_status)
+
+
+def state_error_response(code):
+    """Builds a response for a fixed event or registration state error."""
+    return JsonResponse(
+        {"error": {"code": code, "message": STATE_ERRORS[code]}},
+        status=400,
+    )
 
 
 def _field_messages(detail):
