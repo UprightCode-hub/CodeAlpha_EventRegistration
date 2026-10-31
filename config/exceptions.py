@@ -1,5 +1,7 @@
 import logging
 
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+from django.http import Http404
 from django.http import JsonResponse
 from rest_framework import exceptions as drf_exceptions, status
 from rest_framework.views import exception_handler
@@ -45,9 +47,9 @@ def api_exception_handler(exc, context):
         return error_response("validation_error", fields)
     if isinstance(exc, (drf_exceptions.NotAuthenticated, drf_exceptions.AuthenticationFailed)):
         return error_response("not_authenticated")
-    if isinstance(exc, drf_exceptions.PermissionDenied):
+    if isinstance(exc, (drf_exceptions.PermissionDenied, DjangoPermissionDenied)):
         return error_response("permission_denied")
-    if isinstance(exc, drf_exceptions.NotFound):
+    if isinstance(exc, (drf_exceptions.NotFound, Http404)):
         return error_response("not_found")
     if isinstance(exc, drf_exceptions.MethodNotAllowed):
         return error_response("method_not_allowed")

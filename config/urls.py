@@ -3,6 +3,7 @@ from django.http import HttpResponseRedirect
 from django.urls import include, path, re_path
 
 from config.exceptions import json_not_found
+from events.views import MyEventsView
 
 handler404 = "config.exceptions.json_not_found"
 handler500 = "config.exceptions.json_server_error"
@@ -17,5 +18,7 @@ urlpatterns = [
     path("admin", admin_redirect),
     path("admin/", admin.site.urls),
     path("api/auth/", include("accounts.urls")),
+    path("api/events/", include("events.urls")),
+    path("api/my/events/", MyEventsView.as_view(), name="my-events"),
     re_path(r"^.*$", json_not_found),  # The catch-all would otherwise swallow the admin redirect.
 ]

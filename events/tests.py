@@ -167,6 +167,19 @@ class CreateEventTests(EventTestBase):
         self.assert_field_error(self.create(description="x" * 5001), "description")
         self.assertEqual(self.create(description="x" * 5000).status_code, 201)
 
+    def test_venue_fields_link_and_contact_email_have_length_limits(self):
+        for name, limit in (("venue_name", 200), ("address", 255), ("city", 100)):
+            with self.subTest(field=name):
+                self.assert_field_error(self.create(**{name: "x" * (limit + 1)}), name)
+                self.assertEqual(self.create(**{name: "x" * limit}).status_code, 201)
+        self.assert_field_error(
+            self.create(contact_email="a" * 250 + "@example.com"), "contact_email"
+        )
+        self.assert_field_error(
+            self.create(event_type="online", online_link="https://example.com/" + "a" * 2000),
+            "online_link",
+        )
+
     def test_null_character_is_a_validation_error_not_a_server_error(self):
         self.assert_field_error(self.create(title="bad\x00title"), "title")
         self.assert_field_error(self.create(city="La\x00gos"), "city")
