@@ -30,6 +30,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "config.middleware.BodySizeLimitMiddleware",
     "config.exceptions.JsonExceptionMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -67,6 +68,7 @@ DATABASES = {
         "PASSWORD": os.environ.get("DB_PASSWORD", ""),
         "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "5432"),
+        "OPTIONS": {"connect_timeout": 5},
     }
 }
 
@@ -138,6 +140,11 @@ LOGGING = {
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "loggers": {
+        "accounts.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
         "django.request": {
             "handlers": ["console"],
             "level": "ERROR",
@@ -145,3 +152,8 @@ LOGGING = {
         }
     },
 }
+
+MAX_REQUEST_BODY_BYTES = 1048576
+LOGIN_MAX_FAILURES_PER_USER = 5
+LOGIN_MAX_FAILURES_PER_IP = 20
+LOGIN_LOCK_WINDOW_SECONDS = 900

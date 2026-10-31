@@ -1,17 +1,22 @@
-from rest_framework import generics, status
+from rest_framework import generics, serializers, status
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
-from rest_framework import serializers
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from accounts.serializers import (
+    LoginCredentialsSerializer,
     LoginSerializer,
     RefreshSerializer,
     RegisterSerializer,
     UserSerializer,
 )
+
+
+from accounts.security import blocking_seconds, clear_failures, log_blocked, record_failure
+from config.exceptions import error_response
 
 
 class RegisterView(generics.GenericAPIView):
@@ -27,6 +32,7 @@ class RegisterView(generics.GenericAPIView):
         auth=[],
     )
     def post(self, request, *args, **kwargs):
+        """Handle the submitted request."""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -51,6 +57,35 @@ class LoginView(TokenObtainPairView):
 
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
+
+    def post(self, request, *args, **kwargs):
+        """Validate credentials, enforce lockout, and issue JWT tokens."""
+        body = LoginCredentialsSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        username = body.validated_data["username"]
+        password = body.validated_data["password"]
+        address = request.META.get("REMOTE_ADDR", "")
+
+        retry_after = blocking_seconds(username, address)
+        if retry_after is not None:
+            log_blocked(username, address)
+            return error_response(
+                "too_many_attempts", headers={"Retry-After": str(retry_after)}
+            )
+
+        if len(username) > 150 or len(password) > 128:
+            record_failure(username, address)
+            return error_response("not_authenticated")
+
+        serializer = self.get_serializer(data={"username": username, "password": password})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except (AuthenticationFailed, serializers.ValidationError):
+            record_failure(username, address)
+            return error_response("not_authenticated")
+
+        clear_failures(username, address)
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
 @extend_schema_view(
@@ -82,4 +117,5 @@ class MeView(APIView):
         auth=[{"BearerAuth": []}],
     )
     def get(self, request):
+        """Return the requested data."""
         return Response(UserSerializer(request.user).data)

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from registrations.models import Notification, Registration
+from registrations.models import IdempotencyRecord, Notification, Registration
 
 
 @admin.register(Registration)
@@ -29,4 +29,26 @@ class NotificationAdmin(admin.ModelAdmin):
     list_select_related = ("recipient", "event")
 
     def has_add_permission(self, request):
+        """Prevent adding notifications in the admin."""
+        return False
+
+
+@admin.register(IdempotencyRecord)
+class IdempotencyRecordAdmin(admin.ModelAdmin):
+    """Shows saved idempotency responses without allowing edits."""
+
+    list_display = ("id", "user", "endpoint", "key", "status_code", "created_at")
+    list_filter = ("endpoint", "created_at")
+    search_fields = ("key", "user__username", "endpoint")
+
+    def has_add_permission(self, request):
+        """Prevent adding idempotency records in the admin."""
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """Prevent editing idempotency records in the admin."""
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Prevent deleting idempotency records in the admin."""
         return False

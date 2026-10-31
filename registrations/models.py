@@ -78,3 +78,28 @@ class Notification(models.Model):
     kind = models.CharField(max_length=32, choices=Kind.choices)
     message = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
+
+class IdempotencyRecord(models.Model):
+    """Stores the first successful answer for a scoped request key."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="idempotency_records",
+    )
+    endpoint = models.CharField(max_length=100)
+    key = models.CharField(max_length=64)
+    request_hash = models.CharField(max_length=64)
+    status_code = models.PositiveSmallIntegerField()
+    response_body = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Ensures a user can use each key once per endpoint."""
+
+        constraints = (
+            models.UniqueConstraint(
+                fields=("user", "endpoint", "key"),
+                name="unique_idempotency_key_per_user_endpoint",
+            ),
+        )

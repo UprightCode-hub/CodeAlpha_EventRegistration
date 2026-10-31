@@ -1,5 +1,6 @@
 import logging
 
+from django.db import InterfaceError, OperationalError
 from django.core.exceptions import (
     BadRequest,
     PermissionDenied as DjangoPermissionDenied,
@@ -21,6 +22,10 @@ ERRORS = {
     "not_found": (404, "The requested resource was not found."),
     "method_not_allowed": (405, "This method is not allowed for this endpoint."),
     "server_error": (500, "Something went wrong on the server."),
+    "idempotency_key_reused": (422, "This Idempotency-Key was already used with a different request."),
+    "too_many_attempts": (429, "Too many failed sign-in attempts. Try again later."),
+    "payload_too_large": (413, "The request body is too large."),
+    "service_unavailable": (503, "The service is temporarily unavailable."),
 }
 
 STATE_ERRORS = {
@@ -33,13 +38,16 @@ STATE_ERRORS = {
 }
 
 
-def error_response(code, fields=None):
+def error_response(code, fields=None, status_code=None, headers=None):
     """Builds a response using the public API error format."""
     http_status, message = ERRORS[code]
     error = {"code": code, "message": message}
     if code == "validation_error":
         error["fields"] = fields or {}
-    return JsonResponse({"error": error}, status=http_status)
+    response = JsonResponse({"error": error}, status=status_code or http_status)
+    for name, value in (headers or {}).items():
+        response[name] = value
+    return response
 
 
 def state_error_response(code):
@@ -51,6 +59,7 @@ def state_error_response(code):
 
 
 def _field_messages(detail):
+    """Convert serializer errors into field message lists."""
     if isinstance(detail, dict):
         return {key: _field_messages(value) for key, value in detail.items()}
     if isinstance(detail, (list, tuple)):
@@ -60,6 +69,12 @@ def _field_messages(detail):
 
 def api_exception_handler(exc, context):
     """Converts handled REST framework exceptions to the fixed error shape."""
+    if isinstance(exc, (OperationalError, InterfaceError)):
+        logger.error(
+            "Database connection failed while processing request",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        return error_response("service_unavailable", headers={"Retry-After": "5"})
     response = exception_handler(exc, context)
     if response is None:
         return None
@@ -97,12 +112,15 @@ class JsonExceptionMiddleware:
     """Logs uncaught view errors and returns the generic JSON server response."""
 
     def __init__(self, get_response):
+        """Save the next middleware or view in the request chain."""
         self.get_response = get_response
 
     def __call__(self, request):
+        """Pass the request to the next middleware or view."""
         return self.get_response(request)
 
     def process_exception(self, request, exception):
+        """Log an uncaught exception and return a JSON error."""
         if isinstance(
             exception,
             (Http404, DjangoPermissionDenied, SuspiciousOperation, BadRequest, MultiPartParserError),
@@ -112,4 +130,6 @@ class JsonExceptionMiddleware:
             "Unhandled exception while processing request",
             exc_info=(type(exception), exception, exception.__traceback__),
         )
+        if isinstance(exception, (OperationalError, InterfaceError)):
+            return error_response("service_unavailable", headers={"Retry-After": "5"})
         return error_response("server_error")

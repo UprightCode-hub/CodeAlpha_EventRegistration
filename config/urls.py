@@ -5,6 +5,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.permissions import AllowAny
 
 from config.exceptions import json_not_found
+from config.health import HealthView
 from events.views import MyEventsView
 from registrations.views import OrganizerRegistrationListView, NotificationListView
 
@@ -24,6 +25,7 @@ urlpatterns = [
     path("api/events/", include("events.urls")),
     path("api/registrations/", include("registrations.urls")),
     path("api/notifications/", NotificationListView.as_view(), name="notifications"),
+    path("api/health/", HealthView.as_view(), name="health"),
     path(
         "api/events/<int:pk>/registrations/",
         OrganizerRegistrationListView.as_view(),

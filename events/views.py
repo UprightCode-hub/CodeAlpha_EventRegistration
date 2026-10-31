@@ -10,6 +10,7 @@ from rest_framework import serializers
 
 from accounts.permissions import IsOrganizer
 from config.exceptions import state_error_response
+from config.idempotency import run_idempotent_create
 from events.filters import filter_events
 from events.models import Event
 from events.serializers import CancelEventSerializer, EventReadSerializer, EventWriteSerializer
@@ -47,11 +48,13 @@ class EventListCreateView(APIView):
     http_method_names = ["get", "post", "options"]
 
     def initial(self, request, *args, **kwargs):
+        """Reject unsupported methods before normal request checks."""
         if request.method.lower() not in self.http_method_names:
             raise exceptions.MethodNotAllowed(request.method)
         super().initial(request, *args, **kwargs)
 
     def get_permissions(self):
+        """Return permissions for the current request method."""
         if self.request.method == "POST":
             return [IsAuthenticated(), IsOrganizer()]
         return [AllowAny()]
@@ -73,19 +76,34 @@ class EventListCreateView(APIView):
         auth=[],
     )
     def get(self, request):
+        """Return the requested data."""
         return paginated_response(request, filter_events(request.query_params), self)
 
     @extend_schema(
         summary="Create an event",
         request=EventWriteSerializer,
-        responses={201: EventReadSerializer},
+        parameters=[
+            OpenApiParameter(
+                "Idempotency-Key", OpenApiTypes.STR, OpenApiParameter.HEADER,
+                required=False,
+                description="Optional key for safely retrying this create request.",
+            )
+        ],
+        responses={201: EventReadSerializer, 422: OpenApiTypes.OBJECT},
         auth=[{"BearerAuth": []}],
     )
     def post(self, request):
-        serializer = EventWriteSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        event = serializer.save(organizer=request.user)
-        return Response(EventReadSerializer(event).data, status=status.HTTP_201_CREATED)
+        """Create an event or replay its saved answer for the supplied key."""
+        def create_event():
+            """Run the original event creation and return its response."""
+            serializer = EventWriteSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            event = serializer.save(organizer=request.user)
+            return Response(
+                EventReadSerializer(event).data, status=status.HTTP_201_CREATED
+            )
+
+        return run_idempotent_create(request, "events.create", create_event)
 
 
 class EventDetailView(APIView):
@@ -94,11 +112,13 @@ class EventDetailView(APIView):
     http_method_names = ["get", "patch", "options"]
 
     def initial(self, request, *args, **kwargs):
+        """Reject unsupported methods before normal request checks."""
         if request.method.lower() not in self.http_method_names:
             raise exceptions.MethodNotAllowed(request.method)
         super().initial(request, *args, **kwargs)
 
     def get_permissions(self):
+        """Return permissions for the current request method."""
         if self.request.method == "PATCH":
             return [IsAuthenticated(), IsOrganizer()]
         return [AllowAny()]
@@ -110,6 +130,7 @@ class EventDetailView(APIView):
         auth=[],
     )
     def get(self, request, pk):
+        """Return the requested data."""
         event = get_object_or_404(
             Event.objects.select_related("organizer"),
             pk=pk,
@@ -123,6 +144,7 @@ class EventDetailView(APIView):
         auth=[{"BearerAuth": []}],
     )
     def patch(self, request, pk):
+        """Apply the requested partial update."""
         event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
         if event.organizer_id != request.user.pk:
             return Response(
@@ -142,6 +164,7 @@ class CancelEventView(APIView):
     http_method_names = ["post", "options"]
 
     def get_permissions(self):
+        """Return permissions for the current request method."""
         if self.request.method == "POST":
             return [IsAuthenticated(), IsOrganizer()]
         return [IsAuthenticated()]
@@ -153,6 +176,7 @@ class CancelEventView(APIView):
         auth=[{"BearerAuth": []}],
     )
     def post(self, request, pk):
+        """Handle the submitted request."""
         event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
         if event.organizer_id != request.user.pk:
             return Response(
@@ -173,6 +197,7 @@ class MyEventsView(APIView):
     http_method_names = ["get", "options"]
 
     def initial(self, request, *args, **kwargs):
+        """Reject unsupported methods before normal request checks."""
         if request.method.lower() not in self.http_method_names:
             raise exceptions.MethodNotAllowed(request.method)
         super().initial(request, *args, **kwargs)
@@ -193,6 +218,7 @@ class MyEventsView(APIView):
         auth=[{"BearerAuth": []}],
     )
     def get(self, request):
+        """Return the requested data."""
         queryset = Event.objects.filter(organizer=request.user).select_related(
             "organizer"
         ).annotate(
