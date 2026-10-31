@@ -113,6 +113,12 @@ class EventWriteSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class CancelEventSerializer(serializers.Serializer):
+    """Validates and trims an event cancellation reason."""
+
+    reason = SafeCharField(min_length=1, max_length=500, trim_whitespace=True)
+
+
 class EventReadSerializer(serializers.ModelSerializer):
     """Returns the public event representation."""
 

@@ -1,6 +1,5 @@
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
 from rest_framework import exceptions, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -12,6 +11,7 @@ from config.exceptions import state_error_response
 from events.filters import filter_events
 from events.models import Event
 from events.serializers import EventReadSerializer, EventWriteSerializer
+from registrations.services import RegistrationRuleError, apply_event_edit, cancel_event
 
 
 def event_error(code):
@@ -74,24 +74,41 @@ class EventDetailView(APIView):
         return Response(EventReadSerializer(event).data)
 
     def patch(self, request, pk):
-        event = get_object_or_404(
-            Event.objects.select_related("organizer"),
-            pk=pk,
-        )
+        event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
         if event.organizer_id != request.user.pk:
             return Response(
                 {"error": {"code": "not_found", "message": "The requested resource was not found."}},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        if event.status == Event.Status.CANCELLED:
-            return event_error("event_cancelled")
-        if event.start_at <= timezone.now():
-            return event_error("event_started")
-
-        serializer = EventWriteSerializer(event, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        updated_event = serializer.save()
+        try:
+            updated_event = apply_event_edit(pk, request)
+        except RegistrationRuleError as error:
+            return event_error(error.code)
         return Response(EventReadSerializer(updated_event).data)
+
+
+class CancelEventView(APIView):
+    """Cancels an event for its owning organizer."""
+
+    http_method_names = ["post", "options"]
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsAuthenticated(), IsOrganizer()]
+        return [IsAuthenticated()]
+
+    def post(self, request, pk):
+        event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
+        if event.organizer_id != request.user.pk:
+            return Response(
+                {"error": {"code": "not_found", "message": "The requested resource was not found."}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            cancelled_event = cancel_event(pk, request)
+        except RegistrationRuleError as error:
+            return event_error(error.code)
+        return Response(EventReadSerializer(cancelled_event).data)
 
 
 class MyEventsView(APIView):
