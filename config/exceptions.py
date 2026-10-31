@@ -8,6 +8,7 @@ from django.core.exceptions import (
 from django.http import Http404
 from django.http import JsonResponse
 from django.http.multipartparser import MultiPartParserError
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import exceptions as drf_exceptions, status
 from rest_framework.views import exception_handler
 
@@ -80,6 +81,8 @@ def api_exception_handler(exc, context):
     return error_response("validation_error", {"non_field_errors": ["Invalid request."]})
 
 
+# The API uses token authentication, so the not-found answer must not depend on a CSRF token.
+@csrf_exempt
 def json_not_found(request, exception=None):
     """Returns the standard JSON response for an unknown URL."""
     return error_response("not_found")
