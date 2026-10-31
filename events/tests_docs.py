@@ -1,5 +1,6 @@
 """Tests for the API schema and the Swagger page."""
 
+from django.conf import settings
 import json
 import re
 
@@ -187,9 +188,9 @@ class SchemaRouteTests(TestCase):
                 self.assertEqual(response.json()["error"]["code"], "not_found")
 
     def test_the_admin_without_a_slash_still_redirects(self):
-        response = APIClient().get("/admin")
+        response = APIClient().get("/" + settings.ADMIN_URL.rstrip("/"))
         self.assertIn(response.status_code, (301, 302))
-        self.assertEqual(response["Location"], "/admin/")
+        self.assertEqual(response["Location"], "/" + settings.ADMIN_URL)
 
 
 class SchemaContentTests(SchemaTestBase):
@@ -207,7 +208,7 @@ class SchemaContentTests(SchemaTestBase):
 
     def test_the_schema_does_not_list_itself_or_the_admin(self):
         for path in self.paths:
-            self.assertFalse(path.startswith("/admin"), path)
+            self.assertFalse(path.startswith(("/admin", "/" + settings.ADMIN_URL)), path)
             self.assertFalse(path.startswith("/api/schema"), path)
             self.assertFalse(path.startswith("/api/docs"), path)
 

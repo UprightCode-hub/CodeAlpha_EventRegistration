@@ -255,15 +255,15 @@ class AdminTests(TestCase):
         )
 
     def test_admin_without_a_trailing_slash_redirects(self):
-        response = self.client.get("/admin")
+        response = self.client.get("/" + settings.ADMIN_URL.rstrip("/"))
         self.assertIn(response.status_code, (301, 302))
-        self.assertTrue(response["Location"].endswith("/admin/"))
+        self.assertTrue(response["Location"].endswith("/" + settings.ADMIN_URL))
 
     def test_superuser_can_open_the_admin_and_the_user_list(self):
         self.make_superuser()
         self.assertTrue(self.client.login(username="boss", password=PASSWORD))
-        self.assertEqual(self.client.get("/admin/").status_code, 200)
-        response = self.client.get("/admin/accounts/user/")
+        self.assertEqual(self.client.get("/" + settings.ADMIN_URL).status_code, 200)
+        response = self.client.get("/" + settings.ADMIN_URL + "accounts/user/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "boss")
 
@@ -272,7 +272,7 @@ class AdminTests(TestCase):
             username="alice", email="alice@example.com", password=PASSWORD
         )
         self.assertTrue(self.client.login(username="alice", password=PASSWORD))
-        response = self.client.get("/admin/")
+        response = self.client.get("/" + settings.ADMIN_URL)
         self.assertEqual(response.status_code, 302)
 
     def test_create_superuser_defaults_the_role_to_organizer(self):

@@ -4,8 +4,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from config.admin_url import normalize_admin_url
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+
+ADMIN_URL = normalize_admin_url(os.environ.get("ADMIN_URL", "eventreg-manage/"))
 
 SECRET_KEY = os.environ["SECRET_KEY"]
 DEBUG = os.environ.get("DEBUG", "") == "True"

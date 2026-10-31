@@ -1,5 +1,6 @@
 """Tests for the Django admin pages of every model."""
 
+from django.conf import settings
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -14,10 +15,10 @@ from registrations.models import Notification, Registration
 User = get_user_model()
 
 PASSWORD = "Str0ng-Pass-123"
-USER_LIST = "/admin/accounts/user/"
-EVENT_LIST = "/admin/events/event/"
-REGISTRATION_LIST = "/admin/registrations/registration/"
-NOTIFICATION_LIST = "/admin/registrations/notification/"
+USER_LIST = "/" + settings.ADMIN_URL + "accounts/user/"
+EVENT_LIST = "/" + settings.ADMIN_URL + "events/event/"
+REGISTRATION_LIST = "/" + settings.ADMIN_URL + "registrations/registration/"
+NOTIFICATION_LIST = "/" + settings.ADMIN_URL + "registrations/notification/"
 
 
 class AdminTestBase(TestCase):
@@ -158,11 +159,11 @@ class AdminPageTests(AdminTestBase):
         self.client.logout()
         response = self.client.get(EVENT_LIST)
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response["Location"].startswith("/admin/login/"))
+        self.assertTrue(response["Location"].startswith("/" + settings.ADMIN_URL + "login/"))
         self.client.force_login(self.person)
         response = self.client.get(EVENT_LIST)
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response["Location"].startswith("/admin/login/"))
+        self.assertTrue(response["Location"].startswith("/" + settings.ADMIN_URL + "login/"))
 
 
 class AdminSearchAndFilterTests(AdminTestBase):

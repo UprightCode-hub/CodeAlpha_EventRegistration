@@ -204,5 +204,5 @@ class CsrfEnforcedTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_the_admin_still_checks_csrf(self):
-        response = self.client.post("/admin/login/", {"username": "a", "password": "b"})
+        response = self.client.post("/" + settings.ADMIN_URL + "login/", {"username": "a", "password": "b"})
         self.assertEqual(response.status_code, 403)
