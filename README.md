@@ -4,7 +4,7 @@ This API lets organizers publish events and attendees register for them. When an
 
 There is no frontend. The API and its Swagger page are the whole product.
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the system architecture diagram and request-flow charts.
+See [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the system architecture diagram and request-flow charts.
 
 ## Features
 
@@ -13,7 +13,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the system architecture diagram and
 - Register for an event, cancel a registration, and see your registrations.
 - Fixed seats, a first come first served waitlist, and automatic promotion when a seat is freed or capacity is raised.
 - In app notifications: confirmed, waitlisted, promoted, event updated, event cancelled.
-- Safe retries with an optional `Idempotency-Key` header, sign-in lockout, a request size limit and a health URL.
+- Safe retries with an optional `Idempotency-Key` header, sign-in lockout, rate limits on the busiest endpoints, a request size limit and a health URL.
+- JSON logs with a request id on every line and in every answer, and an optional Prometheus `/metrics` route.
 - A Django admin on a configurable path, a demo data command, the OpenAPI schema and a Swagger page.
 
 ## Stack
@@ -24,6 +25,10 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the system architecture diagram and
 - SimpleJWT 5.5.1
 - drf-spectacular 0.30.0 for the OpenAPI schema and Swagger page
 - PostgreSQL
+- argon2-cffi for password hashing, structlog for JSON logs, prometheus-client for metrics
+- Ruff, mypy and coverage for code checks, listed in `requirements-dev.txt`
+
+The exact versions are pinned in `requirements.txt` and `requirements-dev.txt`.
 
 ## Setup
 
@@ -39,6 +44,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the system architecture diagram and
    ```powershell
    pip install -r requirements.txt
    ```
+
+   To run the tests and the code checks as well, also install `pip install -r requirements-dev.txt`.
 
 3. Create a PostgreSQL user and database. The user needs `CREATEDB`, because the tests create their own database called `test_eventreg`.
 
@@ -64,6 +71,9 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the system architecture diagram and
    | `DB_HOST` | PostgreSQL host. | `localhost` |
    | `DB_PORT` | PostgreSQL port. | `5432` |
    | `ADMIN_URL` | The path the Django admin is served at. See the next section. | `eventreg-manage/` |
+   | `METRICS_ENABLED` | Set to `True` to turn on the `/metrics` route. | off |
+   | `METRICS_TOKEN` | When set, `/metrics` needs `Authorization: Bearer <token>`. | empty |
+   | `THROTTLING_ENABLED` | Rate limits. Only the exact value `True` turns them on. | on, except while the tests run |
 
    Use `DEBUG=True` for local work. There is no static file setup, so this project is for local use and is not set up for production.
 
@@ -135,6 +145,7 @@ Open [http://127.0.0.1:8000/api/docs/](http://127.0.0.1:8000/api/docs/) and try 
 | POST | `/api/registrations/<id>/cancel/` | Owner attendee | Cancel a registration. |
 | GET | `/api/notifications/` | Signed in | List the signed in user's notifications. |
 | GET | `/api/health/` | Public | Check that the database answers. |
+| GET | `/metrics` | Public, off by default | Prometheus metrics. See Logs, request ids and metrics. |
 | GET | `/api/schema/` | Public | The OpenAPI schema. |
 | GET | `/api/docs/` | Public | The Swagger page. |
 
@@ -334,7 +345,46 @@ Messages are cut to 255 characters. An attendee who cancels gets nothing, and th
 
 ## Sign in lockout
 
-Failed sign ins are limited. Five failures for the same username from the same address, or twenty from one address under any username, in 15 minutes, answer 429 `too_many_attempts` with a `Retry-After` header in seconds. While blocked, the password is not checked, even if it is correct. A successful sign in clears the count for that username and address. A wrong password and an unknown username give the same answer. Register and the admin sign in are not limited.
+Failed sign ins are limited. Five failures for the same username from the same address, or twenty from one address under any username, in 15 minutes, answer 429 `too_many_attempts` with a `Retry-After` header in seconds. While blocked, the password is not checked, even if it is correct. A successful sign in clears the count for that username and address. A wrong password and an unknown username give the same answer. The register endpoint and the admin sign in are not covered by the lockout. Register has its own rate limit, described next.
+
+## Rate limits
+
+A few endpoints are limited per minute, apart from the lockout above. Signed in users are counted by user id and get a higher limit. Everyone else is counted by the connecting address, and the `X-Forwarded-For` header is ignored, so a client cannot choose its own address. Each scope has its own count.
+
+| Scope | Endpoints | Anonymous | Signed in |
+|---|---|---|---|
+| `login` | `POST /api/auth/login/` | 20 per minute | 60 per minute |
+| `register` | `POST /api/auth/register/` | 10 per minute | 30 per minute |
+| `public_read` | `GET /api/events/` and `GET /api/events/<id>/` | 60 per minute | 240 per minute |
+| `write` | Create, edit and cancel an event. Create and cancel a registration. | 30 per minute | 120 per minute |
+
+These are the defaults in `THROTTLE_RATES` in `config/settings.py`. Refresh, `me`, the private lists, notifications, health, metrics, the schema and the admin are not limited. A request refused as unauthenticated or forbidden is not counted.
+
+When a limit is passed the answer is 429 `too_many_requests` with a `Retry-After` header in seconds. It is a different error from `too_many_attempts`, which belongs to the sign in lockout.
+
+To see it, start the server normally and run `GET /api/events/` more than 60 times in a minute:
+
+```powershell
+1..70 | ForEach-Object { (Invoke-WebRequest http://127.0.0.1:8000/api/events/ -SkipHttpErrorCheck).StatusCode } | Group-Object | Select-Object Name, Count
+```
+
+The counts are kept in Django's default local memory cache, so they belong to one server process. Set `THROTTLING_ENABLED=False` to turn the limits off, which the live test scripts below need.
+
+## Logs, request ids and metrics
+
+- Every log line is one JSON object with `timestamp`, `level`, `logger`, `event`, any extra fields, and `request_id` while a request is handled. A traceback goes into an `exception` field, and is never sent in an answer.
+- Every answer carries an `X-Request-ID` header. A valid value from the client (1 to 64 letters, digits, `-` or `_`) is kept. Anything else is replaced by a new 32 character id.
+- One `api.access` line is written per request with the method, the path, the status, `duration_ms` and `user_id`. The query string, bodies, the `Authorization` header, passwords and tokens are never logged.
+- `GET /metrics` shows `http_requests_total` and `http_request_duration_seconds` in the Prometheus text format, labelled by method, route and status. It is off unless `METRICS_ENABLED=True`, and then every method answers the JSON `not_found`. With `METRICS_TOKEN` set it also needs the bearer token. Unknown URLs share the route label `unmatched`.
+
+To look at the metrics:
+
+```powershell
+$env:METRICS_ENABLED="True"
+python manage.py runserver
+```
+
+Then open `http://127.0.0.1:8000/metrics`. The metrics are kept in the memory of one server process.
 
 ## Limits and failures
 
@@ -371,6 +421,7 @@ API errors use this JSON shape. A `validation_error` adds a `fields` object that
 | `payload_too_large` | 413 | The request body is too large. |
 | `idempotency_key_reused` | 422 | The key was used with a different request. |
 | `too_many_attempts` | 429 | Too many failed sign in attempts. |
+| `too_many_requests` | 429 | A rate limit was passed. See the `Retry-After` header. |
 | `server_error` | 500 | Something went wrong on the server. |
 | `service_unavailable` | 503 | The service is temporarily unavailable. |
 
@@ -412,22 +463,61 @@ Two rules live in the database, not only in code:
 
 ## Running the tests
 
-The database user needs `CREATEDB`. Run one test run at a time, because runs share the `test_eventreg` database.
+The database user needs `CREATEDB`. Run one test run at a time, because runs share the `test_eventreg` database. The rate limits are off while the test command runs, and the tests that check them turn them on themselves.
 
 ```powershell
-python manage.py test accounts events registrations --noinput
+python manage.py test --noinput --parallel 4
 ```
 
-Add `--parallel 4` to use several workers inside one run. A full run takes several minutes, because the tests use the real password hasher.
+This runs the tests of all three apps. Without `--parallel` a full run takes several minutes, because passwords are hashed with Argon2 in every test outside the registrations API tests.
+
+The last full run: 505 tests, all passing, with 99 percent line coverage.
+
+### Code checks
+
+Install `requirements-dev.txt` first. Use `python -m` so the tools run from the active environment:
+
+```powershell
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy .
+python -m coverage run manage.py test --noinput
+python -m coverage report --skip-empty
+```
+
+`pyproject.toml` holds the settings. The coverage report fails below 80 percent.
+
+### Live checks
+
+Two scripts run against a server that is already running, because some problems only show over real HTTP. Start the server with the limits off, because these scripts send hundreds of requests from one address:
+
+```powershell
+$env:THROTTLING_ENABLED="False"
+python manage.py runserver
+```
+
+Then, in a second window:
+
+```powershell
+python race_test.py
+python smoke_test.py
+```
+
+`race_test.py` sends simultaneous requests at the last seat. `smoke_test.py` checks every endpoint, the error shapes, the retry keys, the lockout, the body size limit, the request id header and the metrics route. Look at the server window afterwards: any line with `ERROR` or a traceback is a finding. A run of the smoke script records failed sign ins from your address, so run it at most twice in 15 minutes, or the lockout will block the next run.
+
+To check the rate limits, restart the server normally, wait a minute, and run `python smoke_test.py --throttle-only`.
 
 ## Project layout
 
-- `config/` holds the settings, the URL routes, the shared error format, the middleware, the health view and the admin path check.
+- `config/` holds the settings, the URL routes, the shared error format, the middleware (request id, metrics, body size limit and JSON errors), the JSON log setup, the metrics route, the rate limit class, the health view and the admin path check.
 - `accounts/` owns users, roles, register, login, the sign in lockout and the account admin.
 - `events/` owns events, their list filters and the `seed_demo` command.
 - `registrations/` owns registrations, notifications, idempotency records and the seat rules.
+- `race_test.py` and `smoke_test.py` are the live check scripts.
+- `docs/` holds ARCHITECTURE.md and DECISIONS.md.
+- `pyproject.toml` holds the Ruff, mypy and coverage settings.
 
 ## Project notes
 
-- [DESIGN.md](./DESIGN.md): the system design, the tradeoffs and how it was tested.
-- [DECISIONS.md](./DECISIONS.md): each decision, the alternative rejected, and why.
+- [ARCHITECTURE.md](./docs/ARCHITECTURE.md): the diagrams of the system and its main flows.
+- [DECISIONS.md](./docs/DECISIONS.md): each decision, the alternative rejected, and why.

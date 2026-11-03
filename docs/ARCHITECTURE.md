@@ -52,14 +52,16 @@ flowchart LR
     Swagger[Swagger UI]
     WSGI[WSGI entrypoint]
     ASGI[ASGI entrypoint]
-    Middleware[Request middleware<br/>body-size limit and JSON exception handling]
+    Middleware[Request middleware<br/>request id, metrics, body-size limit and JSON exception handling]
+    Metrics[Prometheus metrics route<br/>off unless enabled]
+    Logs[JSON logs<br/>access line per request]
     Router[Django URL router]
 
     subgraph API[REST API]
-        Accounts[accounts<br/>registration, JWT login and refresh,<br/>current user, login lockout]
+        Accounts[accounts<br/>registration, JWT login and refresh,<br/>current user, login lockout, rate limits]
         Events[events<br/>event create/read/edit/cancel,<br/>search and filtering]
         Registrations[registrations<br/>attendee registration, cancellation,<br/>waitlist, organizer lists, notifications]
-        Shared[config<br/>settings, validation, permissions support,<br/>idempotency, health and error responses]
+        Shared[config<br/>settings, validation, permissions support,<br/>idempotency, rate limits, logging, health and error responses]
     end
 
     Admin[Configurable Django admin]
@@ -78,6 +80,8 @@ flowchart LR
     Router --> Registrations
     Router --> Admin
     Router --> Schema
+    Router --> Metrics
+    Middleware --> Logs
     Router --> Shared
     Accounts --> Shared
     Events --> Shared
@@ -96,14 +100,16 @@ flowchart LR
 
 | Area | Responsibility |
 |---|---|
-| `config/` | Django settings and WSGI/ASGI setup; root routes; body-size middleware; JSON error conversion; health check; reusable validators, fields, and idempotent-create handling. |
+| `config/` | Django settings and WSGI/ASGI setup; root routes; request-id, metrics and body-size middleware; JSON error conversion; JSON log setup; the metrics route; the scoped rate limit class; health check; shared pagination and schema helpers; reusable validators, fields, and idempotent-create handling. |
 | `accounts/` | Custom user and role model; public registration; JWT login/refresh; current-user endpoint; organizer/attendee permissions; database-backed sign-in lockout. |
 | `events/` | Event model and admin; event validation and filtering; public event reads; organizer-only create, edit, cancel, and owned-event/registration listings. |
-| `registrations/` | Registration, notification, and idempotency-record models; attendee registration/list/cancel; organizer registration view; waitlist ranking and transactional seat/promotion workflows. |
-| `*_tests*.py` and `tests*.py` | API, security, resilience, concurrency/idempotency, query-count, and documentation behavior tests across the apps. |
+| `registrations/` | Registration, notification, and idempotency-record models; attendee registration/list/cancel; organizer registration view; waitlist ranking and transactional seat/promotion workflows. The seat services take plain values and never see the HTTP request. |
+| `*_tests*.py` and `tests*.py` | API, security, hashing, index, structure, logging, metrics, rate limit, resilience, concurrency/idempotency, query-count, and documentation behavior tests across the apps. |
+| `race_test.py`, `smoke_test.py` | Scripts that run against a live server: simultaneous requests for the last seat, and a check of every endpoint, the request id header and the metrics route. |
+| `pyproject.toml`, `requirements-dev.txt` | Settings and packages for Ruff, mypy and coverage. |
 | `events/management/commands/seed_demo.py` | Repeatable demo-data command. |
 
-`manage.py` is the development and administrative command entrypoint. `config.wsgi` and `config.asgi` are the server entrypoints. Runtime settings come from environment variables; PostgreSQL is the configured database. The admin path is configurable, while the API schema and Swagger UI are public.
+`manage.py` is the development and administrative command entrypoint. `config.wsgi` and `config.asgi` are the server entrypoints. Runtime settings come from environment variables; PostgreSQL is the configured database. The admin path is configurable, while the API schema and Swagger UI are public. `/metrics` always exists but answers the JSON `not_found` unless `METRICS_ENABLED` is true.
 
 ## Main data relationships
 
@@ -131,7 +137,9 @@ flowchart TD
     Auth -- No --> Unauthorized[401 not_authenticated]
     Auth -- Yes --> Role{Attendee role?}
     Role -- No --> Forbidden[403 permission_denied]
-    Role -- Yes --> Key{Idempotency-Key supplied?}
+    Role -- Yes --> Limit{Within the write rate limit?}
+    Limit -- No --> TooMany[429 too_many_requests]
+    Limit -- Yes --> Key{Idempotency-Key supplied?}
 
     Key -- Yes --> KeyValid{Key valid and not reused with another body?}
     KeyValid -- No --> KeyError[Validation error or 422 key-reused error]
@@ -184,10 +192,13 @@ Event edits that change a time, venue, format, or location notify registered and
 
 ## Request-wide behavior
 
-1. The body-size middleware rejects oversized declared request bodies before authentication.
-2. Django routes the request to the relevant API, admin, health, schema, or documentation view.
-3. DRF applies JWT authentication and endpoint-specific role/ownership checks. The public API returns JSON errors through the shared exception handler.
-4. Create endpoints may wrap the business operation in database-backed idempotency handling. Repeating the same key and body replays the first successful response; a different body is rejected.
-5. Registration and event lifecycle services use database transactions and an event-row lock to protect seat counts and keep notifications consistent with state changes.
+1. The request-id middleware runs first. It keeps a valid `X-Request-ID` from the client or makes a new one, binds it to every log line of the request, and adds it to the answer, including errors and the 413.
+2. The metrics middleware times the request and records a counter and a histogram under the matched route, or `unmatched`. It skips `/metrics` itself.
+3. The body-size middleware rejects oversized declared request bodies before authentication.
+4. Django routes the request to the relevant API, admin, health, schema, metrics or documentation view.
+5. DRF applies JWT authentication and endpoint-specific role/ownership checks, and only then the rate limit for that endpoint, so a 401 or 403 is answered before anything is counted. A passed limit answers 429. The public API returns JSON errors through the shared exception handler.
+6. Create endpoints may wrap the business operation in database-backed idempotency handling. Repeating the same key and body replays the first successful response; a different body is rejected.
+7. Registration and event lifecycle services use database transactions and an event-row lock to protect seat counts and keep notifications consistent with state changes.
+8. After the answer, one `api.access` line is written with the request id, method, path, status, duration and user id. Log lines are JSON, and never hold query strings, bodies, tokens or passwords.
 
-See [README.md](./README.md) for endpoint details, request fields, and examples, and [DECISIONS.md](./DECISIONS.md) for the design rationale and trade-offs.
+See [README.md](../README.md) for endpoint details, request fields, and examples, and [DECISIONS.md](./DECISIONS.md) for the design rationale and trade-offs.

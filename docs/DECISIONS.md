@@ -54,6 +54,11 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Why:** The log shows an attack as it happens. `%r` keeps control characters in a username from forging a log line. Without a length cap, a very long password makes the hasher do far more work than a normal one.
 - **What breaks if changed:** Attacks would leave no trace, and one request could cost the server a lot of hashing time.
 
+- **Decision:** New passwords are hashed with Argon2. PBKDF2 stays second in the hasher list, so an older hash still verifies and is upgraded to Argon2 the next time its owner signs in.
+- **Alternative rejected:** Keep Django's default PBKDF2 only, or switch to Argon2 only.
+- **Why:** Argon2 is designed to be expensive in memory as well as time, which makes large scale guessing costlier for an attacker, and OWASP's password storage guidance lists it first. Keeping PBKDF2 means no existing account is locked out by the change. Tests check that a new account gets an `argon2$` hash, that an old PBKDF2 hash still logs in, that a wrong password does not change the stored hash, and that a correct login upgrades it. The cost is slower sign-ins and a slower test suite, which I accepted for security.
+- **What breaks if changed:** Dropping PBKDF2 from the list would make every older hash unusable, and dropping Argon2 would put new accounts back on the weaker default.
+
 ## Events
 
 - **Decision:** Events cannot be deleted through the API, and the database refuses to delete an event that has registrations.
@@ -145,8 +150,18 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 
 - **Decision:** Lists compute the seat counts in the same query as the events, and the registration and notification lists compute the waitlist position in the query. A page of 10 costs the same number of queries as a page of 2.
 - **Alternative rejected:** Count per row in the serializer.
-- **Why:** A count per row turns one list into eleven queries or more. Tests compare the query count for pages of different sizes, so a regression shows.
+- **Why:** A count per row turns one list into eleven queries or more. Tests compare the query count for pages of different sizes, so a regression shows. Event detail, create and update answers read both counts in one query as well, and a test checks that the query count of event detail stays the same with 0 and with 10 registrations.
 - **What breaks if changed:** List pages would get slower as pages fill, and the cost would grow with the data.
+
+- **Decision:** The seat services (`cancel_event`, `apply_event_edit` and the others) take plain values such as ids, the acting user and validated data. They do not receive the HTTP request object. The views build those values.
+- **Alternative rejected:** Pass the request into the services.
+- **Why:** Business rules that depend on an HTTP object cannot be called from a command, a test or a worker without faking a request, and a change to the web layer would reach into the rules. A structure test checks that these functions have no `request` parameter and that the module imports nothing from the DRF request or response modules.
+- **What breaks if changed:** The services could no longer be reused or tested without the web layer.
+
+- **Decision:** The models declare named indexes for the lookups the endpoints make: events by status and start time, and by organizer and start time; registrations by event, status and creation time, and by attendee and creation time; notifications by recipient and creation time; and idempotency records by creation time. Indexes that Django already creates for foreign keys and unique constraints are not repeated.
+- **Alternative rejected:** Rely on the indexes Django creates by default.
+- **Why:** The list endpoints filter on status and start time and order by creation time, which the default indexes do not cover together. Tests check that every index is declared on the model and exists in the database, matched by its fields so the names do not matter. I did not compare query plans: with a small table PostgreSQL may still choose a scan, and the benefit shows as the data grows.
+- **What breaks if changed:** The list queries would sort and filter more rows as the tables grow.
 
 ## Notifications
 
@@ -192,6 +207,57 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Why:** Anything that watches the service needs one cheap URL that says whether the database is reachable. A health check that cannot fail is no check.
 - **What breaks if changed:** There would be no simple way to tell whether the API can reach its database.
 
+## Logs, metrics and limits
+
+- **Decision:** Log lines are one JSON object per line, with a request id on every line written while a request is handled. Every answer carries an `X-Request-ID` header. A valid id from the client (1 to 64 letters, digits, `-` or `_`) is kept, and anything else is replaced with a new one, so a client cannot put odd characters into the log. One access line is written per request with the method, the path, the status, the time taken and the user id. The query string, the bodies, the `Authorization` header, passwords and tokens are never logged.
+- **Alternative rejected:** Plain text logs.
+- **Why:** A system that collects logs can search JSON by field, and the request id ties together the access line, an error and a sign-in warning from one request. Leaving out query strings and headers keeps secrets out of the log. A test collects every record the request loggers emit while a wrong password and a bad token are sent, and checks that neither appears in any form.
+- **What breaks if changed:** Logs would be harder to search, and a secret in a query string could end up in them.
+
+- **Decision:** `GET /metrics` exposes request counts and durations in the Prometheus format. It is off unless `METRICS_ENABLED` is true, and an optional `METRICS_TOKEN` requires a bearer token. When it is off, every method answers the JSON `not_found`, like an unknown URL. The route is exempt from the CSRF check, it is not counted in its own numbers and it is not in the schema. Unknown URLs share one `unmatched` label.
+- **Alternative rejected:** A public metrics route, or labels that include the raw path.
+- **Why:** A metrics page shows traffic and error rates to anyone who can reach it, so it is closed by default. Using the matched route as the label keeps the number of label values fixed. A client cannot create new ones by asking for random paths. The CSRF exemption came from the smoke test: the route passed its tests, but a real POST got Django's HTML 403 page, which for a disabled route would have told a scanner that the path exists. A test with a client that enforces the CSRF check now covers it.
+- **What breaks if changed:** An open metrics route would leak traffic details, raw paths would grow the metrics without limit, and without the exemption a disabled route would stand out from an unknown URL.
+
+- **Decision:** Chosen endpoints are rate limited, and signed-in users get a higher limit than anonymous clients. The scopes are sign-in, register, the public event list and detail, and the write operations (create, edit and cancel an event, create and cancel a registration). Signed-in users are counted by user id and everyone else by the connecting address only, and the `X-Forwarded-For` header is ignored. Each scope is counted separately, and endpoints that share a scope share one count. A request counts whether it succeeds or fails, but one refused earlier as unauthenticated or forbidden is not counted. The answer is 429 `too_many_requests` with `Retry-After`. Refresh, `me`, the private lists, notifications, health, metrics, the schema and the admin are not limited.
+- **Alternative rejected:** One global limit, trusting `X-Forwarded-For`, or no limits beyond the sign-in lockout.
+- **Why:** The limited endpoints are the ones attackers and crawlers hit first. A header the client controls would let anyone pick a new address for each request. The sign-in lockout stays as it is, with its own error code `too_many_attempts`, because it answers a different question: too many wrong passwords, not too many requests. The rates are read from settings on every request, so tests and deployments can change them.
+- **What breaks if changed:** Trusting the forwarded header would make the limit meaningless, and one shared count for everything would let a busy reader block someone who only wants to sign in.
+
+- **Decision:** Throttling is on by default and off by default while the test command runs. A `THROTTLING_ENABLED` value in the environment overrides either. The throttle tests switch it on themselves and set small rates.
+- **Alternative rejected:** Leave it on during all tests, or keep it off everywhere unless set.
+- **Why:** The other tests send hundreds of requests from one address, so limits would fail them for a reason that has nothing to do with the code. This is a setting that differs by mode, which I avoided for the password hasher, and I accepted it here because the throttle tests prove the real behavior with the limit on. The live race and smoke scripts need the limit off for the same reason, so the smoke script has a separate `--throttle-only` mode for a server that has it on.
+- **What breaks if changed:** Leaving the limit on in tests would make the suite fail at random, and a server started with `THROTTLING_ENABLED=False` has no limits at all.
+
+## Performance choices
+
+- **Decision:** The API uses ordinary synchronous views and the Django ORM, not async views.
+- **Alternative rejected:** Async views on ASGI.
+- **Why:** The work in every request is database work, and the Django ORM is synchronous. An async view would hand that work to a thread anyway, which adds overhead without running the database work in parallel. The part that needs care under concurrency is the last seat, and that is solved in the database by the row lock, the conditional unique constraint and the idempotency record, and checked by the race test, which sends simultaneous requests at the last seat. Async would pay off for slow outside calls such as sending email, and this project makes none.
+- **What breaks if changed:** Mixing async views with the synchronous ORM would add thread hops and make the transaction handling harder to reason about, for no gain.
+
+- **Decision:** There is no response cache for events.
+- **Alternative rejected:** Cache the public event list and detail in Redis or the local memory cache.
+- **Why:** `seats_left` changes on every registration and cancellation, and it is the field a client most wants to be right. A cache would need to be cleared after every committed change, and a missed clear would show an event as having a seat when it does not. List pages are paged, filtered and indexed, and the query count does not grow with the page, so the saving is small for the risk. If traffic grew, I would cache only the parts that change slowly, after measuring.
+- **What breaks if changed:** Seat counts could be stale for as long as the cache lives.
+
+## Code quality tooling
+
+- **Decision:** Style and lint are checked with Ruff (line length 100, import order, bugbear and pyupgrade rules). Types are checked with mypy and the Django and DRF stubs. One `pyproject.toml` holds the settings for both. The two live scripts, `smoke_test.py` and `race_test.py`, are left out of both checks.
+- **Alternative rejected:** Check by eye, or write type hints without running a checker.
+- **Why:** Type hints that nothing checks drift out of date. Running the checker found real inconsistencies, for example a class method written as an instance method, and a repeated schema constant that the stubs typed wrongly. Where a library's stubs cannot express something, the rule is a narrow `type: ignore` with the error code and a reason, and not a broad suppression. The live scripts are standalone, use only the standard library and have long one-line checks on purpose, so forcing them through the app's style rules would only churn a file that is proven by running it.
+- **What breaks if changed:** The hints would stop being checked and the style would drift between files.
+
+- **Decision:** Coverage is measured with the coverage tool, with a minimum of 80 percent set in `pyproject.toml`. Server entry points that tests do not import (`wsgi.py`, `asgi.py`) are left out of the measure.
+- **Alternative rejected:** Chase 100 percent, or not measure.
+- **Why:** The number shows which code the tests never run. The few lines that are missed are defensive branches, and tests written only to touch them would prove nothing. The measured figure goes in the README from the final run, because it changes with every change to the code.
+- **What breaks if changed:** Without a threshold, coverage could fall and nobody would notice.
+
+- **Decision:** The tools that check and measure the code are listed in `requirements-dev.txt`, apart from `requirements.txt`.
+- **Alternative rejected:** Put everything in one file.
+- **Why:** A server that only runs the API does not need a linter, a type checker or a coverage tool.
+- **What breaks if changed:** A production install would carry packages it never uses.
+
 ## Admin, demo data and docs
 
 - **Decision:** Every model is registered in the Django admin with useful columns, filters and search fields. Lists use `select_related` and annotated counts, so a list page costs the same number of queries for 2 rows as for 12. Notifications cannot be added in the admin. `LoginFailure` and `IdempotencyRecord` are read only.
@@ -216,10 +282,10 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 
 ## Testing
 
-- **Decision:** The test suite uses the same password hasher as the running app, Django's default.
-- **Alternative rejected:** A fast hasher such as MD5, switched on only while the tests run.
-- **Why:** The tests then run the real hashing code, and nothing in the settings differs between tests and the running app. The cost is a slower suite: a full run takes several minutes, and the slowest tests are the lockout and query count tests that create many users or log in repeatedly.
-- **What breaks if changed:** The tests would no longer cover the real hashing path, and a setting that differs by mode is one more thing to keep in sync.
+- **Decision:** The tests use the real password hasher list, with Argon2 first and PBKDF2 second. The one exception is the registrations API tests, which share one base class that switches to a fast hasher with `override_settings` to keep that suite short. The hashing tests and everything else run the real list.
+- **Alternative rejected:** A fast hasher for the whole suite, or the real hasher everywhere with no exception.
+- **Why:** The tests that matter for hashing must run the real code, and they do: they check the `argon2$` prefix, the PBKDF2 upgrade and the login. The registrations API tests create many users and log them in, and only check seats, waitlists and notifications, so the hasher is not what they prove. Limiting the fast hasher to one shared base keeps the exception in one place, and no other test can pick it up by accident. A full run without `--parallel` takes several minutes.
+- **What breaks if changed:** Using the fast hasher more widely would leave the real hashing path less covered, and making that suite use the real one would make it much slower.
 
 - **Decision:** The tests run on a separate database `test_eventreg` on the same PostgreSQL server and engine as the real one. Only one run happens at a time, and Django clones the test database for the parallel workers inside a run.
 - **Alternative rejected:** SQLite for the tests.
@@ -228,7 +294,7 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 
 - **Decision:** Besides the test suite, two scripts run against the live server: a race test for the last seat and a smoke test over every endpoint.
 - **Alternative rejected:** Rely on the test suite alone.
-- **Why:** The Django test client skips the CSRF check, so 340 tests passed while real HTTP got an HTML 403 on unknown URLs. Only a real request found it.
+- **Why:** The Django test client skips the CSRF check, so every test passed while real HTTP got an HTML 403 on unknown URLs. The same thing happened later with the metrics route. Only a real request found them, and a test with a client that enforces the CSRF check now covers the second one. The smoke script also checks the request id header, the metrics route and, in its own mode, the rate limit answer.
 - **What breaks if changed:** Problems in middleware and request handling would not show until a client hit them.
 
 ## Known gaps
@@ -236,7 +302,10 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - No payments. Events are free.
 - No guests per registration.
 - No logout or token blacklist.
-- Only failed sign-ins are rate limited. Other endpoints are not.
+- Rate limits cover the sign-in, register, public read and write endpoints. Their counts are kept in Django's default local memory cache, in one server process, so several workers would each have their own and a shared cache would be needed.
+- The metrics are kept in the memory of one server process.
+- The metrics route has a token but no network restriction, so a real deployment should keep it on a private network.
+- Behind a proxy every anonymous client shares one connecting address, so the anonymous rate limits would apply to all of them together.
 - The sign-in lockout counts by the connecting address, so behind a proxy every client would share one address.
 - The Django admin sign-in has no lockout.
 - The hidden admin path keeps out scans of `/admin/` and is not access control.
@@ -253,3 +322,7 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 ## If this grew 10x
 
 - Send notifications and emails from a background worker, with retries.
+- Keep the rate limit counts in a shared cache, and run the metrics in the library's multiprocess mode, so that several workers agree.
+- Take the client address from a trusted proxy header that the proxy sets, not from the client.
+- Cache only the event data that changes slowly, after measuring, and keep seat counts out of any cache.
+- Add async views only where a slow outside call, such as sending email, makes the wait real.
