@@ -1,0 +1,23 @@
+[tool.ruff]
+line-length = 100
+extend-exclude = ["**/migrations/**", "venv/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = ["(^|/)migrations/", "(^|/)(tests?[^/]*|test_[^/]*)\\.py$"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
+
+[tool.coverage.run]
+source = ["accounts", "events", "registrations", "config"]
+omit = ["*/migrations/*", "*/tests*.py", "manage.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

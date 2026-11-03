@@ -1,0 +1,5 @@
+ruff
+mypy
+django-stubs
+djangorestframework-stubs
+coverage
