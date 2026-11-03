@@ -14,5 +14,5 @@ def paginated_response(
 ) -> Response:
     """Return a page using the configured pagination response shape."""
     paginator = PageNumberPagination()
-    page = paginator.paginate_queryset(queryset, request, view=view)
+    page: Any = paginator.paginate_queryset(queryset, request, view=view)
     return paginator.get_paginated_response(serializer_class(page, many=True).data)

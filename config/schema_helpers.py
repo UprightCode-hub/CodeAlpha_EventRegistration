@@ -5,6 +5,8 @@ from typing import Any
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, inline_serializer
 from rest_framework import serializers
 
+BEARER_AUTH: list[Any] = [{"BearerAuth": []}]
+
 
 def page_schema(name: str, item_serializer: Any) -> Any:
     """Describe a page envelope around a response item serializer."""

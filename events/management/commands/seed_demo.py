@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Any
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
@@ -20,21 +21,17 @@ class Command(BaseCommand):
             email="demo_organizer@example.com",
             role="organizer",
         )
-        self.stdout.write(
-            f"User demo_organizer {'created' if created else 'already existed'}."
-        )
+        self.stdout.write(f"User demo_organizer {'created' if created else 'already existed'}.")
         attendee, created = self.get_or_create_user(
             user_model,
             username="demo_attendee",
             email="demo_attendee@example.com",
             role="attendee",
         )
-        self.stdout.write(
-            f"User demo_attendee {'created' if created else 'already existed'}."
-        )
+        self.stdout.write(f"User demo_attendee {'created' if created else 'already existed'}.")
 
         now = timezone.now()
-        definitions = (
+        definitions: tuple[dict[str, Any], ...] = (
             {
                 "title": "Demo In Person Conference",
                 "days": 7,
@@ -78,9 +75,9 @@ class Command(BaseCommand):
                 **definition,
                 "organizer": organizer,
                 "description": f"A sample {definition['event_type']} event.",
-                "category": "conference" if definition["event_type"] == "in_person" else (
-                    "webinar" if definition["event_type"] == "online" else "meetup"
-                ),
+                "category": "conference"
+                if definition["event_type"] == "in_person"
+                else ("webinar" if definition["event_type"] == "online" else "meetup"),
                 "start_at": start_at,
                 "end_at": start_at + timedelta(hours=2),
                 "registration_deadline": start_at,

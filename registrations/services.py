@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import timezone as datetime_timezone
+from datetime import UTC
 from typing import Any
 
 from django.db import IntegrityError, transaction
@@ -32,10 +32,14 @@ def notification_message(kind: str, title: str, reason: str | None = None) -> st
 
 
 def _promote_waitlist_locked(event: Event) -> None:
-    while event.registrations.filter(status=Registration.Status.REGISTERED).count() < event.capacity:
-        waiting = event.registrations.filter(
-            status=Registration.Status.WAITLISTED
-        ).order_by("created_at", "id").first()
+    while (
+        event.registrations.filter(status=Registration.Status.REGISTERED).count() < event.capacity
+    ):
+        waiting = (
+            event.registrations.filter(status=Registration.Status.WAITLISTED)
+            .order_by("created_at", "id")
+            .first()
+        )
         if waiting is None:
             break
         waiting.status = Registration.Status.REGISTERED
@@ -78,9 +82,7 @@ def register_attendee(
             status__in=(Registration.Status.REGISTERED, Registration.Status.WAITLISTED),
         ).exists():
             raise RegistrationRuleError("already_registered")
-        registered_count = event.registrations.filter(
-            status=Registration.Status.REGISTERED
-        ).count()
+        registered_count = event.registrations.filter(status=Registration.Status.REGISTERED).count()
         status_value = (
             Registration.Status.REGISTERED
             if registered_count < event.capacity
@@ -186,17 +188,15 @@ def apply_event_edit(
         serializer = validate_edit(event)
         values = serializer.validated_data
         new_capacity = values.get("capacity", event.capacity)
-        registered_count = event.registrations.filter(
-            status=Registration.Status.REGISTERED
-        ).count()
+        registered_count = event.registrations.filter(status=Registration.Status.REGISTERED).count()
         if new_capacity < registered_count:
             raise RegistrationRuleError("capacity_too_low")
 
         def same_value(field_name: str, new_value: Any) -> bool:
             old_value = getattr(event, field_name)
             if field_name in ("start_at", "end_at"):
-                return old_value.astimezone(datetime_timezone.utc) == new_value.astimezone(
-                    datetime_timezone.utc
+                return old_value.astimezone(UTC) == new_value.astimezone(
+                    UTC
                 )
             return old_value == new_value
 

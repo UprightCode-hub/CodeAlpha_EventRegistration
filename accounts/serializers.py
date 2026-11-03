@@ -64,8 +64,6 @@ class RefreshSerializer(serializers.Serializer):
     refresh = serializers.CharField()
 
 
-
-
 class LoginCredentialsSerializer(serializers.Serializer):
     """Validates required sign-in fields without checking credentials."""
 

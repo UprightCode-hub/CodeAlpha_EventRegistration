@@ -24,11 +24,13 @@ class EventAdmin(admin.ModelAdmin):
     list_select_related = ("organizer",)
 
     def get_queryset(self, request):
-        return super().get_queryset(request).annotate(
-            registered_total=Count(
-                "registrations", filter=Q(registrations__status="registered")
-            ),
-            waitlist_total=Count(
-                "registrations", filter=Q(registrations__status="waitlisted")
-            ),
+        return (
+            super()
+            .get_queryset(request)
+            .annotate(
+                registered_total=Count(
+                    "registrations", filter=Q(registrations__status="registered")
+                ),
+                waitlist_total=Count("registrations", filter=Q(registrations__status="waitlisted")),
+            )
         )

@@ -4,7 +4,8 @@ from django.contrib.auth.models import UserManager as DjangoUserManager
 class UserManager(DjangoUserManager):
     """Creates users with normalized email addresses and organizer superusers."""
 
-    def normalize_email(self, email):
+    @classmethod
+    def normalize_email(cls, email: str | None) -> str:
         return super().normalize_email(email).lower()
 
     def create_superuser(self, username, email=None, password=None, **extra_fields):

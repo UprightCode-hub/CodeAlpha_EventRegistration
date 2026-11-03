@@ -22,12 +22,16 @@ def blocking_seconds(username, address):
     normalized = normalize_username(username)
     now = timezone.now()
     cutoff = now - timedelta(seconds=settings.LOGIN_LOCK_WINDOW_SECONDS)
-    user_failures = LoginFailure.objects.filter(
-        username=normalized, ip_address=address, created_at__gte=cutoff
-    ).order_by("created_at", "pk").values_list("created_at", flat=True)
-    address_failures = LoginFailure.objects.filter(
-        ip_address=address, created_at__gte=cutoff
-    ).order_by("created_at", "pk").values_list("created_at", flat=True)
+    user_failures = (
+        LoginFailure.objects.filter(username=normalized, ip_address=address, created_at__gte=cutoff)
+        .order_by("created_at", "pk")
+        .values_list("created_at", flat=True)
+    )
+    address_failures = (
+        LoginFailure.objects.filter(ip_address=address, created_at__gte=cutoff)
+        .order_by("created_at", "pk")
+        .values_list("created_at", flat=True)
+    )
 
     def retry_after(failures, limit):
         """Find when enough old failures expire to fall below a limit."""
@@ -63,14 +67,9 @@ def record_failure(username, address):
 
 def clear_failures(username, address):
     """Clear recent failures for one normalized username and address."""
-    LoginFailure.objects.filter(
-        username=normalize_username(username), ip_address=address
-    ).delete()
+    LoginFailure.objects.filter(username=normalize_username(username), ip_address=address).delete()
 
 
 def log_blocked(username, address):
     """Log a blocked sign-in without recording another failure."""
-    logger.warning(
-        "login blocked username=%r address=%s", normalize_username(username), address
-    )
-
+    logger.warning("login blocked username=%r address=%s", normalize_username(username), address)

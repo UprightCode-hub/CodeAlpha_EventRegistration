@@ -92,9 +92,7 @@ class EventWriteSerializer(serializers.ModelSerializer):
                 "The registration deadline must be on or before the event start."
             ]
         if self.instance is None and deadline <= now:
-            errors["registration_deadline"] = [
-                "The registration deadline must be in the future."
-            ]
+            errors["registration_deadline"] = ["The registration deadline must be in the future."]
 
         event_type = current("event_type")
         required_by_type = {
@@ -104,9 +102,7 @@ class EventWriteSerializer(serializers.ModelSerializer):
         }
         for field_name in required_by_type.get(event_type, ()):
             if not current(field_name):
-                errors[field_name] = [
-                    "This field is required for the selected event type."
-                ]
+                errors[field_name] = ["This field is required for the selected event type."]
 
         if errors:
             raise serializers.ValidationError(errors)

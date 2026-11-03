@@ -20,13 +20,20 @@ class SafeCharField(serializers.CharField):
 def with_waitlist_position(queryset):
     """Annotates each registration with its rank among event waitlist rows."""
     # Counting through the current row gives its 1-based rank in the same SQL query.
-    prior = Registration.objects.filter(
-        event_id=OuterRef("event_id"),
-        status=Registration.Status.WAITLISTED,
-    ).filter(
-        Q(created_at__lt=OuterRef("created_at"))
-        | Q(created_at=OuterRef("created_at"), id__lte=OuterRef("id"))
-    ).order_by().values("event_id").annotate(total=Count("id")).values("total")[:1]
+    prior = (
+        Registration.objects.filter(
+            event_id=OuterRef("event_id"),
+            status=Registration.Status.WAITLISTED,
+        )
+        .filter(
+            Q(created_at__lt=OuterRef("created_at"))
+            | Q(created_at=OuterRef("created_at"), id__lte=OuterRef("id"))
+        )
+        .order_by()
+        .values("event_id")
+        .annotate(total=Count("id"))
+        .values("total")[:1]
+    )
     return queryset.annotate(
         waitlist_position_value=Case(
             When(
@@ -62,15 +69,26 @@ class RegistrationReadSerializer(serializers.ModelSerializer):
     event = serializers.IntegerField(source="event_id", read_only=True)
     event_title = serializers.CharField(source="event.title", read_only=True)
     event_start_at = serializers.DateTimeField(source="event.start_at", read_only=True)
-    waitlist_position = serializers.IntegerField(source="waitlist_position_value", read_only=True, allow_null=True)
+    waitlist_position = serializers.IntegerField(
+        source="waitlist_position_value", read_only=True, allow_null=True
+    )
 
     class Meta:
         """Defines the registration response fields."""
 
         model = Registration
-        fields = (
-            "id", "event", "event_title", "event_start_at", "full_name", "phone",
-            "note", "status", "waitlist_position", "created_at", "updated_at",
+        fields: tuple[str, ...] = (
+            "id",
+            "event",
+            "event_title",
+            "event_start_at",
+            "full_name",
+            "phone",
+            "note",
+            "status",
+            "waitlist_position",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -92,7 +110,9 @@ class NotificationReadSerializer(serializers.ModelSerializer):
 
     event_title = serializers.CharField(source="event.title", read_only=True)
     event = serializers.IntegerField(source="event_id", read_only=True)
-    registration = serializers.IntegerField(source="registration_id", read_only=True, allow_null=True)
+    registration = serializers.IntegerField(
+        source="registration_id", read_only=True, allow_null=True
+    )
 
     class Meta:
         """Defines the notification response fields."""

@@ -1,12 +1,11 @@
-from datetime import date
 import re
+from datetime import date
 
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import serializers
 
 from events.models import Event
-
 
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -51,13 +50,9 @@ def filter_events(params):
     if errors:
         raise serializers.ValidationError(errors)
 
-    queryset = Event.objects.select_related("organizer").annotate(
-        registered_total=Count(
-            "registrations", filter=Q(registrations__status="registered")
-        ),
-        waitlist_total=Count(
-            "registrations", filter=Q(registrations__status="waitlisted")
-        ),
+    queryset = Event.objects.select_related("organizer").annotate(  # type: ignore[no-redef]  # QuerySet annotation.
+        registered_total=Count("registrations", filter=Q(registrations__status="registered")),
+        waitlist_total=Count("registrations", filter=Q(registrations__status="waitlisted")),
     )
     if status_value == Event.Status.CANCELLED:
         queryset = queryset.filter(status=Event.Status.CANCELLED)
@@ -74,9 +69,7 @@ def filter_events(params):
 
     query = params.get("q")
     if query:
-        queryset = queryset.filter(
-            Q(title__icontains=query) | Q(description__icontains=query)
-        )
+        queryset = queryset.filter(Q(title__icontains=query) | Q(description__icontains=query))
     city = params.get("city")
     if city:
         queryset = queryset.filter(city__icontains=city)

@@ -13,7 +13,5 @@ def normalize_admin_url(value):
         or segment.lower() == "admin"
         or re.fullmatch(r"[A-Za-z0-9_-]+", segment, flags=re.ASCII) is None
     ):
-        raise ImproperlyConfigured(
-            "ADMIN_URL must be one valid segment and cannot be admin."
-        )
+        raise ImproperlyConfigured("ADMIN_URL must be one valid segment and cannot be admin.")
     return segment + "/"

@@ -14,6 +14,7 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from config.exceptions import error_response
+
 KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 
 
@@ -36,9 +37,7 @@ def run_idempotent_create(
     raw_body = request._request.body
     request_hash = hashlib.sha256(raw_body).hexdigest()
     expires_before = timezone.now() - timedelta(hours=24)
-    records = record_model.objects.filter(
-        user=request.user, endpoint=endpoint, key=key
-    )
+    records = record_model.objects.filter(user=request.user, endpoint=endpoint, key=key)
     with transaction.atomic():
         records.filter(created_at__lt=expires_before).delete()
         try:

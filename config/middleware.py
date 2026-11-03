@@ -23,4 +23,3 @@ class BodySizeLimitMiddleware:
         if body_size > settings.MAX_REQUEST_BODY_BYTES:
             return error_response("payload_too_large")
         return self.get_response(request)
-

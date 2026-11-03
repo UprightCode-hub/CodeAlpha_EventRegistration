@@ -1,11 +1,12 @@
+from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 from rest_framework import generics, serializers, status
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from accounts.security import blocking_seconds, clear_failures, log_blocked, record_failure
 from accounts.serializers import (
     LoginCredentialsSerializer,
     LoginSerializer,
@@ -13,10 +14,8 @@ from accounts.serializers import (
     RegisterSerializer,
     UserSerializer,
 )
-
-
-from accounts.security import blocking_seconds, clear_failures, log_blocked, record_failure
 from config.exceptions import error_response
+from config.schema_helpers import BEARER_AUTH
 
 
 class RegisterView(generics.GenericAPIView):
@@ -55,7 +54,7 @@ class RegisterView(generics.GenericAPIView):
 class LoginView(TokenObtainPairView):
     """Exchanges a username and password for JWT tokens."""
 
-    permission_classes = [AllowAny]
+    permission_classes = (AllowAny,)  # type: ignore[assignment]  # SimpleJWT stub is too narrow.
     serializer_class = LoginSerializer
 
     def post(self, request, *args, **kwargs):
@@ -69,9 +68,7 @@ class LoginView(TokenObtainPairView):
         retry_after = blocking_seconds(username, address)
         if retry_after is not None:
             log_blocked(username, address)
-            return error_response(
-                "too_many_attempts", headers={"Retry-After": str(retry_after)}
-            )
+            return error_response("too_many_attempts", headers={"Retry-After": str(retry_after)})
 
         if len(username) > 150 or len(password) > 128:
             record_failure(username, address)
@@ -103,7 +100,7 @@ class LoginView(TokenObtainPairView):
 class RefreshView(TokenRefreshView):
     """Exchanges a refresh token for a new access token."""
 
-    permission_classes = [AllowAny]
+    permission_classes = (AllowAny,)  # type: ignore[assignment]  # SimpleJWT stub is too narrow.
 
 
 class MeView(APIView):
@@ -114,7 +111,7 @@ class MeView(APIView):
     @extend_schema(
         summary="Get the signed-in account",
         responses={200: UserSerializer},
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def get(self, request):
         """Return the requested data."""

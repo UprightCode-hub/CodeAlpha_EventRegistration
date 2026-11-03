@@ -1,16 +1,17 @@
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import exceptions, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 
 from accounts.permissions import IsOrganizer
 from config.exceptions import error_response, state_error_response
 from config.idempotency import run_idempotent_create
 from config.pagination import paginated_response
 from config.schema_helpers import (
+    BEARER_AUTH,
     idempotency_key_parameter,
     page_parameter,
     page_schema,
@@ -20,6 +21,14 @@ from events.models import Event
 from events.serializers import CancelEventSerializer, EventReadSerializer, EventWriteSerializer
 from registrations.models import IdempotencyRecord
 from registrations.services import RegistrationRuleError, apply_event_edit, cancel_event
+
+
+def events_with_registration_counts():
+    """Return events annotated with both registration counts."""
+    return Event.objects.select_related("organizer").annotate(  # type: ignore[no-redef]  # QuerySet annotation.
+        registered_total=Count("registrations", filter=Q(registrations__status="registered")),
+        waitlist_total=Count("registrations", filter=Q(registrations__status="waitlisted")),
+    )
 
 
 def event_error(code):
@@ -73,22 +82,20 @@ class EventListCreateView(APIView):
             idempotency_key_parameter(),
         ],
         responses={201: EventReadSerializer, 422: OpenApiTypes.OBJECT},
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def post(self, request):
         """Create an event or replay its saved answer for the supplied key."""
+
         def create_event():
             """Run the original event creation and return its response."""
             serializer = EventWriteSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             event = serializer.save(organizer=request.user)
-            return Response(
-                EventReadSerializer(event).data, status=status.HTTP_201_CREATED
-            )
+            event = events_with_registration_counts().get(pk=event.pk)
+            return Response(EventReadSerializer(event).data, status=status.HTTP_201_CREATED)
 
-        return run_idempotent_create(
-            request, "events.create", create_event, IdempotencyRecord
-        )
+        return run_idempotent_create(request, "events.create", create_event, IdempotencyRecord)
 
 
 class EventDetailView(APIView):
@@ -116,17 +123,14 @@ class EventDetailView(APIView):
     )
     def get(self, request, pk):
         """Return the requested data."""
-        event = get_object_or_404(
-            Event.objects.select_related("organizer"),
-            pk=pk,
-        )
+        event = get_object_or_404(events_with_registration_counts(), pk=pk)
         return Response(EventReadSerializer(event).data)
 
     @extend_schema(
         summary="Edit an event",
         request=EventWriteSerializer,
         responses={200: EventReadSerializer},
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def patch(self, request, pk):
         """Apply the requested partial update."""
@@ -144,6 +148,7 @@ class EventDetailView(APIView):
             updated_event = apply_event_edit(pk, validate_edit)
         except RegistrationRuleError as error:
             return event_error(error.code)
+        updated_event = events_with_registration_counts().get(pk=updated_event.pk)
         return Response(EventReadSerializer(updated_event).data)
 
 
@@ -162,7 +167,7 @@ class CancelEventView(APIView):
         summary="Cancel an event",
         request=CancelEventSerializer,
         responses={200: EventReadSerializer},
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def post(self, request, pk):
         """Handle the submitted request."""
@@ -200,19 +205,19 @@ class MyEventsView(APIView):
         operation_id="my_events_list",
         parameters=[page_parameter()],
         responses={200: page_schema("MyEventsPageResponse", EventReadSerializer)},
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def get(self, request):
         """Return the requested data."""
-        queryset = Event.objects.filter(organizer=request.user).select_related(
-            "organizer"
-        ).annotate(
-            registered_total=Count(
-                "registrations", filter=Q(registrations__status="registered")
-            ),
-            waitlist_total=Count(
-                "registrations", filter=Q(registrations__status="waitlisted")
-            ),
+        queryset = (
+            Event.objects.filter(organizer=request.user)
+            .select_related("organizer")
+            .annotate(  # type: ignore[no-redef]  # QuerySet annotation.
+                registered_total=Count(
+                    "registrations", filter=Q(registrations__status="registered")
+                ),
+                waitlist_total=Count("registrations", filter=Q(registrations__status="waitlisted")),
+            )
         )
         queryset = queryset.order_by("-start_at", "-id")
         return paginated_response(request, queryset, self, EventReadSerializer)

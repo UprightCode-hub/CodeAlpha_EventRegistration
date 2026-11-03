@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -16,7 +18,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.ATTENDEE)
 
-    objects = UserManager()
+    objects: ClassVar[UserManager] = UserManager()
 
     REQUIRED_FIELDS = ["email"]
 
@@ -24,6 +26,7 @@ class User(AbstractUser):
         """Store the account email in lowercase."""
         self.email = self.email.lower()
         super().save(*args, **kwargs)
+
 
 class LoginFailure(models.Model):
     """Stores a failed sign-in for a username and network address."""

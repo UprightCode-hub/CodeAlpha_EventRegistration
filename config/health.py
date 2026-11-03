@@ -20,4 +20,3 @@ class HealthView(APIView):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
         return Response({"status": "ok"})
-

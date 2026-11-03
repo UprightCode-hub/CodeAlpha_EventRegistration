@@ -8,7 +8,7 @@ from rest_framework.permissions import AllowAny
 from config.exceptions import json_not_found
 from config.health import HealthView
 from events.views import MyEventsView
-from registrations.views import OrganizerRegistrationListView, NotificationListView
+from registrations.views import NotificationListView, OrganizerRegistrationListView
 
 handler404 = "config.exceptions.json_not_found"
 handler500 = "config.exceptions.json_server_error"
@@ -38,9 +38,7 @@ urlpatterns = [
     ),
     path(
         "api/docs/",
-        SpectacularSwaggerView.as_view(
-            url_name="schema", permission_classes=[AllowAny]
-        ),
+        SpectacularSwaggerView.as_view(url_name="schema", permission_classes=[AllowAny]),
         name="swagger-ui",
     ),
     # The catch-all would otherwise swallow the configured admin redirect.

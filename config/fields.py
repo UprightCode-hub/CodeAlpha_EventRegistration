@@ -1,4 +1,4 @@
-from datetime import timezone as datetime_timezone
+from datetime import UTC
 
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import is_aware
@@ -14,7 +14,7 @@ class OffsetDateTimeField(serializers.DateTimeField):
     }
 
     def __init__(self, *args, **kwargs):
-        kwargs.setdefault("default_timezone", datetime_timezone.utc)
+        kwargs.setdefault("default_timezone", UTC)
         kwargs.setdefault("format", "iso-8601")
         super().__init__(*args, **kwargs)
 

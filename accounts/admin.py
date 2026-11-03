@@ -8,10 +8,13 @@ from accounts.models import LoginFailure, User
 class UserAdmin(DjangoUserAdmin):
     """Provides account management in Django admin."""
 
-    list_display = (*DjangoUserAdmin.list_display, "role")
-    list_filter = (*DjangoUserAdmin.list_filter, "role")
+    list_display = (*DjangoUserAdmin.list_display, "role")  # type: ignore[misc]  # Django class attributes are generic.
+    list_filter = (*DjangoUserAdmin.list_filter, "role")  # type: ignore[misc]  # Django class attributes are generic.
     search_fields = ("username", "email")
-    fieldsets = (*DjangoUserAdmin.fieldsets, ("Account role", {"fields": ("role",)}))
+    fieldsets = (  # type: ignore[misc]  # Django class attribute typing.
+        *DjangoUserAdmin.fieldsets,
+        ("Account role", {"fields": ("role",)}),
+    )
     add_fieldsets = (
         *DjangoUserAdmin.add_fieldsets,
         ("Account role", {"fields": ("role",)}),

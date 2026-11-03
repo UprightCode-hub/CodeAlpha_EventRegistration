@@ -1,15 +1,16 @@
 from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 
 from accounts.permissions import IsAttendee, IsOrganizer
 from config.exceptions import error_response, state_error_response
 from config.idempotency import run_idempotent_create
 from config.pagination import paginated_response
 from config.schema_helpers import (
+    BEARER_AUTH,
     idempotency_key_parameter,
     page_parameter,
     page_schema,
@@ -53,10 +54,11 @@ class RegistrationListCreateView(APIView):
             idempotency_key_parameter(),
         ],
         responses={201: RegistrationReadSerializer, 422: OpenApiTypes.OBJECT},
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def post(self, request):
         """Create an attendee registration or replay its saved answer."""
+
         def create_registration():
             """Run the original registration creation and return its response."""
             serializer = RegistrationRequestSerializer(data=request.data)
@@ -72,9 +74,7 @@ class RegistrationListCreateView(APIView):
             except RegistrationRuleError as error:
                 return registration_state_response(error)
             item = get_object_or_404(
-                with_waitlist_position(
-                    Registration.objects.select_related("event", "attendee")
-                ),
+                with_waitlist_position(Registration.objects.select_related("event", "attendee")),
                 pk=registration.pk,
             )
             return Response(RegistrationReadSerializer(item).data, status=201)
@@ -90,10 +90,8 @@ class RegistrationListCreateView(APIView):
             page_parameter(),
             OpenApiParameter("status", OpenApiTypes.STR, OpenApiParameter.QUERY),
         ],
-        responses={
-            200: page_schema("RegistrationPageResponse", RegistrationReadSerializer)
-        },
-        auth=[{"BearerAuth": []}],
+        responses={200: page_schema("RegistrationPageResponse", RegistrationReadSerializer)},
+        auth=BEARER_AUTH,
     )
     def get(self, request):
         """Return the requested data."""
@@ -125,14 +123,12 @@ class RegistrationDetailView(APIView):
         summary="Get an attendee registration",
         operation_id="registrations_retrieve",
         responses={200: RegistrationReadSerializer},
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def get(self, request, pk):
         """Return the requested data."""
         queryset = with_waitlist_position(
-            Registration.objects.filter(attendee=request.user).select_related(
-                "event", "attendee"
-            )
+            Registration.objects.filter(attendee=request.user).select_related("event", "attendee")
         )
         registration = get_object_or_404(queryset, pk=pk)
         return Response(RegistrationReadSerializer(registration).data)
@@ -153,7 +149,7 @@ class RegistrationCancelView(APIView):
         summary="Cancel an attendee registration",
         request=None,
         responses={200: RegistrationReadSerializer},
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def post(self, request, pk):
         """Handle the submitted request."""
@@ -166,9 +162,7 @@ class RegistrationCancelView(APIView):
         except RegistrationRuleError as error:
             return registration_state_response(error)
         item = get_object_or_404(
-            with_waitlist_position(
-                Registration.objects.select_related("event", "attendee")
-            ),
+            with_waitlist_position(Registration.objects.select_related("event", "attendee")),
             pk=updated.pk,
         )
         return Response(RegistrationReadSerializer(item).data)
@@ -186,16 +180,16 @@ class NotificationListView(APIView):
     @extend_schema(
         summary="List the signed-in user's notifications",
         parameters=[page_parameter()],
-        responses={
-            200: page_schema("NotificationPageResponse", NotificationReadSerializer)
-        },
-        auth=[{"BearerAuth": []}],
+        responses={200: page_schema("NotificationPageResponse", NotificationReadSerializer)},
+        auth=BEARER_AUTH,
     )
     def get(self, request):
         """Return the requested data."""
-        queryset = Notification.objects.filter(recipient=request.user).select_related(
-            "event", "registration"
-        ).order_by("-created_at", "-id")
+        queryset = (
+            Notification.objects.filter(recipient=request.user)
+            .select_related("event", "registration")
+            .order_by("-created_at", "-id")
+        )
         return paginated_response(request, queryset, self, NotificationReadSerializer)
 
 
@@ -218,7 +212,7 @@ class OrganizerRegistrationListView(APIView):
                 "OrganizerRegistrationPageResponse", OrganizerRegistrationReadSerializer
             )
         },
-        auth=[{"BearerAuth": []}],
+        auth=BEARER_AUTH,
     )
     def get(self, request, pk):
         """Return the requested data."""
@@ -226,8 +220,6 @@ class OrganizerRegistrationListView(APIView):
         if event.organizer_id != request.user.pk:
             return error_response("not_found")
         queryset = with_waitlist_position(
-            Registration.objects.filter(event_id=event.pk).select_related(
-                "event", "attendee"
-            )
+            Registration.objects.filter(event_id=event.pk).select_related("event", "attendee")
         ).order_by("created_at", "id")
         return paginated_response(request, queryset, self, OrganizerRegistrationReadSerializer)

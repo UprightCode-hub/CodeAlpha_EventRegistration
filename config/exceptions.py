@@ -1,16 +1,18 @@
 import logging
 
-from django.db import InterfaceError, OperationalError
 from django.core.exceptions import (
     BadRequest,
-    PermissionDenied as DjangoPermissionDenied,
     SuspiciousOperation,
 )
-from django.http import Http404
-from django.http import JsonResponse
+from django.core.exceptions import (
+    PermissionDenied as DjangoPermissionDenied,
+)
+from django.db import InterfaceError, OperationalError
+from django.http import Http404, JsonResponse
 from django.http.multipartparser import MultiPartParserError
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework import exceptions as drf_exceptions, status
+from rest_framework import exceptions as drf_exceptions
+from rest_framework import status
 from rest_framework.views import exception_handler
 
 logger = logging.getLogger("django.request")
@@ -22,7 +24,10 @@ ERRORS = {
     "not_found": (404, "The requested resource was not found."),
     "method_not_allowed": (405, "This method is not allowed for this endpoint."),
     "server_error": (500, "Something went wrong on the server."),
-    "idempotency_key_reused": (422, "This Idempotency-Key was already used with a different request."),
+    "idempotency_key_reused": (
+        422,
+        "This Idempotency-Key was already used with a different request.",
+    ),
     "too_many_attempts": (429, "Too many failed sign-in attempts. Try again later."),
     "payload_too_large": (413, "The request body is too large."),
     "service_unavailable": (503, "The service is temporarily unavailable."),
@@ -123,7 +128,13 @@ class JsonExceptionMiddleware:
         """Log an uncaught exception and return a JSON error."""
         if isinstance(
             exception,
-            (Http404, DjangoPermissionDenied, SuspiciousOperation, BadRequest, MultiPartParserError),
+            (
+                Http404,
+                DjangoPermissionDenied,
+                SuspiciousOperation,
+                BadRequest,
+                MultiPartParserError,
+            ),
         ):
             return None
         logger.error(
