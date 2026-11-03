@@ -15,6 +15,7 @@ from config.schema_helpers import (
     page_parameter,
     page_schema,
 )
+from config.throttles import ScopedRateThrottle
 from events.models import Event
 from registrations.models import IdempotencyRecord, Notification, Registration
 from registrations.serializers import (
@@ -40,6 +41,8 @@ class RegistrationListCreateView(APIView):
     """Creates registrations and lists the signed-in attendee's registrations."""
 
     http_method_names = ["get", "post", "options"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = {"POST": "write"}
 
     def get_permissions(self):
         """Return permissions for the current request method."""
@@ -138,6 +141,8 @@ class RegistrationCancelView(APIView):
     """Cancels one registration for its owning attendee."""
 
     http_method_names = ["post", "options"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "write"
 
     def get_permissions(self):
         """Return permissions for the current request method."""

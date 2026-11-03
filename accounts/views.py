@@ -16,6 +16,7 @@ from accounts.serializers import (
 )
 from config.exceptions import error_response
 from config.schema_helpers import BEARER_AUTH
+from config.throttles import ScopedRateThrottle
 
 
 class RegisterView(generics.GenericAPIView):
@@ -23,6 +24,8 @@ class RegisterView(generics.GenericAPIView):
 
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "register"
 
     @extend_schema(
         summary="Register an account",
@@ -56,6 +59,8 @@ class LoginView(TokenObtainPairView):
 
     permission_classes = (AllowAny,)  # type: ignore[assignment]  # SimpleJWT stub is too narrow.
     serializer_class = LoginSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
     def post(self, request, *args, **kwargs):
         """Validate credentials, enforce lockout, and issue JWT tokens."""

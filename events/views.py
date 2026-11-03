@@ -16,6 +16,7 @@ from config.schema_helpers import (
     page_parameter,
     page_schema,
 )
+from config.throttles import ScopedRateThrottle
 from events.filters import filter_events
 from events.models import Event
 from events.serializers import CancelEventSerializer, EventReadSerializer, EventWriteSerializer
@@ -40,6 +41,8 @@ class EventListCreateView(APIView):
     """Reads public event pages and creates events for organizers."""
 
     http_method_names = ["get", "post", "options"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = {"GET": "public_read", "POST": "write"}
 
     def initial(self, request, *args, **kwargs):
         """Reject unsupported methods before normal request checks."""
@@ -102,6 +105,8 @@ class EventDetailView(APIView):
     """Reads an event publicly and edits it for its organizer."""
 
     http_method_names = ["get", "patch", "options"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = {"GET": "public_read", "PATCH": "write"}
 
     def initial(self, request, *args, **kwargs):
         """Reject unsupported methods before normal request checks."""
@@ -156,6 +161,8 @@ class CancelEventView(APIView):
     """Cancels an event for its owning organizer."""
 
     http_method_names = ["post", "options"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "write"
 
     def get_permissions(self):
         """Return permissions for the current request method."""

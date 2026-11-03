@@ -1,4 +1,5 @@
 import logging
+import math
 
 from django.core.exceptions import (
     BadRequest,
@@ -29,6 +30,7 @@ ERRORS = {
         "This Idempotency-Key was already used with a different request.",
     ),
     "too_many_attempts": (429, "Too many failed sign-in attempts. Try again later."),
+    "too_many_requests": (429, "Too many requests. Try again later."),
     "payload_too_large": (413, "The request body is too large."),
     "service_unavailable": (503, "The service is temporarily unavailable."),
 }
@@ -88,6 +90,9 @@ def api_exception_handler(exc, context):
         if not isinstance(fields, dict):
             fields = {"non_field_errors": fields}
         return error_response("validation_error", fields)
+    if isinstance(exc, drf_exceptions.Throttled):
+        retry_after = max(1, math.ceil(exc.wait or 0))
+        return error_response("too_many_requests", headers={"Retry-After": str(retry_after)})
     if isinstance(exc, (drf_exceptions.NotAuthenticated, drf_exceptions.AuthenticationFailed)):
         return error_response("not_authenticated")
     if isinstance(exc, (drf_exceptions.PermissionDenied, DjangoPermissionDenied)):

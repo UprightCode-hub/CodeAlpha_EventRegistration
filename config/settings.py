@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -188,3 +189,14 @@ LOGIN_MAX_FAILURES_PER_IP = 20
 LOGIN_LOCK_WINDOW_SECONDS = 900
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "") == "True"
 METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "")
+THROTTLING_ENABLED = (
+    os.environ.get("THROTTLING_ENABLED", "") == "True"
+    if "THROTTLING_ENABLED" in os.environ
+    else "test" not in sys.argv
+)
+THROTTLE_RATES = {
+    "login": {"anon": "20/minute", "user": "60/minute"},
+    "register": {"anon": "10/minute", "user": "30/minute"},
+    "public_read": {"anon": "60/minute", "user": "240/minute"},
+    "write": {"anon": "30/minute", "user": "120/minute"},
+}
