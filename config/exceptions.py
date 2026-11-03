@@ -91,7 +91,7 @@ def api_exception_handler(exc, context):
             fields = {"non_field_errors": fields}
         return error_response("validation_error", fields)
     if isinstance(exc, drf_exceptions.Throttled):
-        retry_after = max(1, math.ceil(exc.wait or 0))
+        retry_after = max(1, math.ceil(getattr(exc, "wait", None) or 0))
         return error_response("too_many_requests", headers={"Retry-After": str(retry_after)})
     if isinstance(exc, (drf_exceptions.NotAuthenticated, drf_exceptions.AuthenticationFailed)):
         return error_response("not_authenticated")

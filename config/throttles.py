@@ -11,7 +11,7 @@ class ScopedRateThrottle(BaseThrottle):
     """Throttle requests using the scope configured on each API view."""
 
     cache = cache
-    timer = time.time
+    timer = staticmethod(time.time)
 
     def allow_request(self, request, view):
         """Allow the request when its active scope remains below its rate."""

@@ -339,9 +339,7 @@ class CreateEventTests(EventTestBase):
         start = (timezone.now() + timedelta(days=30)).replace(tzinfo=None)
         end = start + timedelta(hours=3)
         self.assert_field_error(
-            self.create(
-                start_at=start.isoformat(), end_at=(end.replace(tzinfo=UTC)).isoformat()
-            ),
+            self.create(start_at=start.isoformat(), end_at=(end.replace(tzinfo=UTC)).isoformat()),
             "start_at",
         )
         later = timezone.now() + timedelta(days=30)

@@ -195,9 +195,7 @@ def apply_event_edit(
         def same_value(field_name: str, new_value: Any) -> bool:
             old_value = getattr(event, field_name)
             if field_name in ("start_at", "end_at"):
-                return old_value.astimezone(UTC) == new_value.astimezone(
-                    UTC
-                )
+                return old_value.astimezone(UTC) == new_value.astimezone(UTC)
             return old_value == new_value
 
         changed_location_or_time = any(
