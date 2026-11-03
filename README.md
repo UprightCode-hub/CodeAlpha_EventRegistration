@@ -4,6 +4,8 @@ This API lets organizers publish events and attendees register for them. When an
 
 There is no frontend. The API and its Swagger page are the whole product.
 
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the system architecture diagram and request-flow charts.
+
 ## Features
 
 - Register and sign in as an organizer or an attendee, with JWT access and refresh tokens.
