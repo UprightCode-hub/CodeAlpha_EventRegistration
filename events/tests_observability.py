@@ -9,7 +9,6 @@ from datetime import datetime
 import structlog
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
-from rest_framework.test import APIClient
 
 User = get_user_model()
 PASSWORD = "Str0ng-Pass-9271!x"
@@ -67,7 +66,10 @@ class RequestIdTests(TestCase):
 
     def test_an_oversized_body_answer_carries_the_header(self):
         response = self.client.post(
-            "/api/auth/login/", data=b"{}", content_type="application/json", CONTENT_LENGTH="1048577"
+            "/api/auth/login/",
+            data=b"{}",
+            content_type="application/json",
+            CONTENT_LENGTH="1048577",
         )
         self.assertEqual(response.status_code, 413)
         self.assertRegex(response["X-Request-ID"], HEX32)
@@ -123,7 +125,9 @@ class AccessLogTests(TestCase):
             username="log_user", email="log_user@example.com", password=PASSWORD, role="attendee"
         )
         login = self.client.post(
-            "/api/auth/login/", {"username": "log_user", "password": PASSWORD}, content_type="application/json"
+            "/api/auth/login/",
+            {"username": "log_user", "password": PASSWORD},
+            content_type="application/json",
         )
         token = login.json()["access"]
         with self.assertLogs("api.access", level="INFO") as captured:
@@ -146,16 +150,30 @@ class AccessLogTests(TestCase):
     def test_passwords_and_tokens_never_reach_any_log_line(self):
         secret_password = "NeverLogThisPw-1"
         secret_token = "secrettoken123abc"
-        with self.assertLogs(level="DEBUG") as captured:
-            self.client.post(
-                "/api/auth/login/",
-                {"username": "nobody", "password": secret_password},
-                content_type="application/json",
-            )
-            self.client.get("/api/auth/me/", HTTP_AUTHORIZATION="Bearer " + secret_token)
-        self.assertTrue(captured.records)
-        for record in captured.records:
-            text = render(record) + record.getMessage()
+        collected = []
+
+        class Collect(logging.Handler):
+            """Keeps every record the watched loggers emit."""
+
+            def emit(self, record):
+                collected.append(record)
+
+        handler = Collect(level=logging.DEBUG)
+        for name in ("api.access", "accounts.security", "django.request", "django"):
+            watched = logging.getLogger(name)
+            watched.addHandler(handler)
+            self.addCleanup(watched.removeHandler, handler)
+        self.client.post(
+            "/api/auth/login/",
+            {"username": "nobody", "password": secret_password},
+            content_type="application/json",
+        )
+        self.client.get("/api/auth/me/", HTTP_AUTHORIZATION="Bearer " + secret_token)
+        names = {record.name for record in collected}
+        self.assertIn("api.access", names)
+        self.assertIn("accounts.security", names)
+        for record in collected:
+            text = render(record) + record.getMessage() + repr(record.__dict__)
             self.assertNotIn(secret_password, text)
             self.assertNotIn(secret_token, text)
 
@@ -185,7 +203,11 @@ class JsonFormatTests(TestCase):
         self.assertEqual(stamp.utcoffset().total_seconds(), 0)
 
     def test_levels_are_lowercase(self):
-        for level, name in ((logging.INFO, "info"), (logging.ERROR, "error"), (logging.DEBUG, "debug")):
+        for level, name in (
+            (logging.INFO, "info"),
+            (logging.ERROR, "error"),
+            (logging.DEBUG, "debug"),
+        ):
             with self.subTest(level=name):
                 self.assertEqual(json.loads(render(make_record("x", level=level)))["level"], name)
 

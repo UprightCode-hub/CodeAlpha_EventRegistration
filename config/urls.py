@@ -7,6 +7,7 @@ from rest_framework.permissions import AllowAny
 
 from config.exceptions import json_not_found
 from config.health import HealthView
+from config.metrics import metrics_view
 from events.views import MyEventsView
 from registrations.views import NotificationListView, OrganizerRegistrationListView
 
@@ -25,6 +26,7 @@ urlpatterns = [
     path("api/registrations/", include("registrations.urls")),
     path("api/notifications/", NotificationListView.as_view(), name="notifications"),
     path("api/health/", HealthView.as_view(), name="health"),
+    path("metrics", metrics_view, name="metrics"),
     path(
         "api/events/<int:pk>/registrations/",
         OrganizerRegistrationListView.as_view(),

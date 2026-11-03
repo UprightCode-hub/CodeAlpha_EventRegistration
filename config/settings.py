@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from config.admin_url import normalize_admin_url
+from config.logging import configure_structlog
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -34,6 +35,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "config.middleware.RequestIdMiddleware",
+    "config.metrics.MetricsMiddleware",
     "config.middleware.BodySizeLimitMiddleware",
     "config.exceptions.JsonExceptionMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -146,7 +149,13 @@ SIMPLE_JWT = {
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "formatters": {"json": {"()": "config.logging.json_formatter"}},
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+        }
+    },
     "loggers": {
         "accounts.security": {
             "handlers": ["console"],
@@ -158,10 +167,24 @@ LOGGING = {
             "level": "ERROR",
             "propagate": False,
         },
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "api.access": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
+
+configure_structlog()
 
 MAX_REQUEST_BODY_BYTES = 1048576
 LOGIN_MAX_FAILURES_PER_USER = 5
 LOGIN_MAX_FAILURES_PER_IP = 20
 LOGIN_LOCK_WINDOW_SECONDS = 900
+METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "") == "True"
+METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "")
