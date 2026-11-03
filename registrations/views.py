@@ -1,16 +1,21 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, inline_serializer
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 
 from accounts.permissions import IsAttendee, IsOrganizer
 from config.exceptions import error_response, state_error_response
 from config.idempotency import run_idempotent_create
+from config.pagination import paginated_response
+from config.schema_helpers import (
+    idempotency_key_parameter,
+    page_parameter,
+    page_schema,
+)
 from events.models import Event
-from registrations.models import Notification, Registration
+from registrations.models import IdempotencyRecord, Notification, Registration
 from registrations.serializers import (
     NotificationReadSerializer,
     OrganizerRegistrationReadSerializer,
@@ -23,26 +28,6 @@ from registrations.services import (
     cancel_registration,
     register_attendee,
 )
-
-
-def page_schema(name, item_serializer):
-    """Describes a page envelope around the supplied response item."""
-    return inline_serializer(
-        name=name,
-        fields={
-            "count": serializers.IntegerField(),
-            "next": serializers.URLField(allow_null=True),
-            "previous": serializers.URLField(allow_null=True),
-            "results": item_serializer(many=True),
-        },
-    )
-
-
-def paginated_response(request, queryset, view, serializer_class):
-    """Returns one page using the configured page size and response shape."""
-    paginator = PageNumberPagination()
-    page = paginator.paginate_queryset(queryset, request, view=view)
-    return paginator.get_paginated_response(serializer_class(page, many=True).data)
 
 
 def registration_state_response(error):
@@ -65,11 +50,7 @@ class RegistrationListCreateView(APIView):
         summary="Create an attendee registration",
         request=RegistrationRequestSerializer,
         parameters=[
-            OpenApiParameter(
-                "Idempotency-Key", OpenApiTypes.STR, OpenApiParameter.HEADER,
-                required=False,
-                description="Optional key for safely retrying this create request.",
-            )
+            idempotency_key_parameter(),
         ],
         responses={201: RegistrationReadSerializer, 422: OpenApiTypes.OBJECT},
         auth=[{"BearerAuth": []}],
@@ -99,14 +80,14 @@ class RegistrationListCreateView(APIView):
             return Response(RegistrationReadSerializer(item).data, status=201)
 
         return run_idempotent_create(
-            request, "registrations.create", create_registration
+            request, "registrations.create", create_registration, IdempotencyRecord
         )
 
     @extend_schema(
         summary="List the attendee's registrations",
         operation_id="registrations_list",
         parameters=[
-            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY),
+            page_parameter(),
             OpenApiParameter("status", OpenApiTypes.STR, OpenApiParameter.QUERY),
         ],
         responses={
@@ -204,7 +185,7 @@ class NotificationListView(APIView):
 
     @extend_schema(
         summary="List the signed-in user's notifications",
-        parameters=[OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY)],
+        parameters=[page_parameter()],
         responses={
             200: page_schema("NotificationPageResponse", NotificationReadSerializer)
         },
@@ -231,7 +212,7 @@ class OrganizerRegistrationListView(APIView):
 
     @extend_schema(
         summary="List registrations for an owned event",
-        parameters=[OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY)],
+        parameters=[page_parameter()],
         responses={
             200: page_schema(
                 "OrganizerRegistrationPageResponse", OrganizerRegistrationReadSerializer

@@ -3,20 +3,26 @@
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from datetime import timedelta
+from typing import Any, cast
 
 from django.db import IntegrityError, transaction
+from django.http import JsonResponse
 from django.utils import timezone
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from config.exceptions import error_response
-from registrations.models import IdempotencyRecord
-
 KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 
 
-def run_idempotent_create(request, endpoint, handler):
+def run_idempotent_create(
+    request: Any,
+    endpoint: str,
+    handler: Callable[[], Response | JsonResponse],
+    record_model: type[Any],
+) -> Response | JsonResponse:
     """Run or replay a create response for a scoped idempotency key."""
     key = request.headers.get("Idempotency-Key")
     if key is None:
@@ -30,14 +36,14 @@ def run_idempotent_create(request, endpoint, handler):
     raw_body = request._request.body
     request_hash = hashlib.sha256(raw_body).hexdigest()
     expires_before = timezone.now() - timedelta(hours=24)
-    records = IdempotencyRecord.objects.filter(
+    records = record_model.objects.filter(
         user=request.user, endpoint=endpoint, key=key
     )
     with transaction.atomic():
         records.filter(created_at__lt=expires_before).delete()
         try:
             with transaction.atomic():
-                record = IdempotencyRecord.objects.create(
+                record = record_model.objects.create(
                     user=request.user,
                     endpoint=endpoint,
                     key=key,
@@ -60,7 +66,7 @@ def run_idempotent_create(request, endpoint, handler):
 
         response = handler()
         if response.status_code == 201:
-            rendered_body = JSONRenderer().render(response.data)
+            rendered_body = JSONRenderer().render(cast(Response, response).data)
             record.response_body = json.loads(rendered_body.decode("utf-8"))
             record.status_code = response.status_code
             record.save(update_fields=("response_body", "status_code"))

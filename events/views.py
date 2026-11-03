@@ -1,45 +1,30 @@
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import exceptions, status
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, inline_serializer
-from rest_framework import serializers
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 
 from accounts.permissions import IsOrganizer
-from config.exceptions import state_error_response
+from config.exceptions import error_response, state_error_response
 from config.idempotency import run_idempotent_create
+from config.pagination import paginated_response
+from config.schema_helpers import (
+    idempotency_key_parameter,
+    page_parameter,
+    page_schema,
+)
 from events.filters import filter_events
 from events.models import Event
 from events.serializers import CancelEventSerializer, EventReadSerializer, EventWriteSerializer
+from registrations.models import IdempotencyRecord
 from registrations.services import RegistrationRuleError, apply_event_edit, cancel_event
-
-
-def event_page_schema():
-    """Describes a paged event response."""
-    return inline_serializer(
-        name="EventListPageResponse",
-        fields={
-            "count": serializers.IntegerField(),
-            "next": serializers.URLField(allow_null=True),
-            "previous": serializers.URLField(allow_null=True),
-            "results": EventReadSerializer(many=True),
-        },
-    )
 
 
 def event_error(code):
     """Builds a fixed response for event state errors."""
     return state_error_response(code)
-
-
-def paginated_response(request, queryset, view):
-    """Returns one page using the configured page size and response shape."""
-    paginator = PageNumberPagination()
-    page = paginator.paginate_queryset(queryset, request, view=view)
-    return paginator.get_paginated_response(EventReadSerializer(page, many=True).data)
 
 
 class EventListCreateView(APIView):
@@ -63,7 +48,7 @@ class EventListCreateView(APIView):
         summary="List and filter upcoming events",
         operation_id="events_list",
         parameters=[
-            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY),
+            page_parameter(),
             OpenApiParameter("q", OpenApiTypes.STR, OpenApiParameter.QUERY),
             OpenApiParameter("city", OpenApiTypes.STR, OpenApiParameter.QUERY),
             OpenApiParameter("category", OpenApiTypes.STR, OpenApiParameter.QUERY),
@@ -72,22 +57,20 @@ class EventListCreateView(APIView):
             OpenApiParameter("starts_after", OpenApiTypes.DATE, OpenApiParameter.QUERY),
             OpenApiParameter("starts_before", OpenApiTypes.DATE, OpenApiParameter.QUERY),
         ],
-        responses={200: event_page_schema()},
+        responses={200: page_schema("EventListPageResponse", EventReadSerializer)},
         auth=[],
     )
     def get(self, request):
         """Return the requested data."""
-        return paginated_response(request, filter_events(request.query_params), self)
+        return paginated_response(
+            request, filter_events(request.query_params), self, EventReadSerializer
+        )
 
     @extend_schema(
         summary="Create an event",
         request=EventWriteSerializer,
         parameters=[
-            OpenApiParameter(
-                "Idempotency-Key", OpenApiTypes.STR, OpenApiParameter.HEADER,
-                required=False,
-                description="Optional key for safely retrying this create request.",
-            )
+            idempotency_key_parameter(),
         ],
         responses={201: EventReadSerializer, 422: OpenApiTypes.OBJECT},
         auth=[{"BearerAuth": []}],
@@ -103,7 +86,9 @@ class EventListCreateView(APIView):
                 EventReadSerializer(event).data, status=status.HTTP_201_CREATED
             )
 
-        return run_idempotent_create(request, "events.create", create_event)
+        return run_idempotent_create(
+            request, "events.create", create_event, IdempotencyRecord
+        )
 
 
 class EventDetailView(APIView):
@@ -147,12 +132,16 @@ class EventDetailView(APIView):
         """Apply the requested partial update."""
         event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
         if event.organizer_id != request.user.pk:
-            return Response(
-                {"error": {"code": "not_found", "message": "The requested resource was not found."}},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return error_response("not_found")
+
+        def validate_edit(locked_event):
+            """Validate the edit against the locked event values."""
+            serializer = EventWriteSerializer(locked_event, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            return serializer
+
         try:
-            updated_event = apply_event_edit(pk, request)
+            updated_event = apply_event_edit(pk, validate_edit)
         except RegistrationRuleError as error:
             return event_error(error.code)
         return Response(EventReadSerializer(updated_event).data)
@@ -179,12 +168,16 @@ class CancelEventView(APIView):
         """Handle the submitted request."""
         event = get_object_or_404(Event.objects.only("id", "organizer_id"), pk=pk)
         if event.organizer_id != request.user.pk:
-            return Response(
-                {"error": {"code": "not_found", "message": "The requested resource was not found."}},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return error_response("not_found")
+
+        def validate_reason():
+            """Validate and return the submitted cancellation reason."""
+            serializer = CancelEventSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            return serializer.validated_data["reason"]
+
         try:
-            cancelled_event = cancel_event(pk, request)
+            cancelled_event = cancel_event(pk, validate_reason)
         except RegistrationRuleError as error:
             return event_error(error.code)
         return Response(EventReadSerializer(cancelled_event).data)
@@ -205,16 +198,8 @@ class MyEventsView(APIView):
     @extend_schema(
         summary="List events owned by the organizer",
         operation_id="my_events_list",
-        parameters=[OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY)],
-        responses={200: inline_serializer(
-            name="MyEventsPageResponse",
-            fields={
-                "count": serializers.IntegerField(),
-                "next": serializers.URLField(allow_null=True),
-                "previous": serializers.URLField(allow_null=True),
-                "results": EventReadSerializer(many=True),
-            },
-        )},
+        parameters=[page_parameter()],
+        responses={200: page_schema("MyEventsPageResponse", EventReadSerializer)},
         auth=[{"BearerAuth": []}],
     )
     def get(self, request):
@@ -230,4 +215,4 @@ class MyEventsView(APIView):
             ),
         )
         queryset = queryset.order_by("-start_at", "-id")
-        return paginated_response(request, queryset, self)
+        return paginated_response(request, queryset, self, EventReadSerializer)

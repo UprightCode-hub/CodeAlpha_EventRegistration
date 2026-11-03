@@ -59,6 +59,12 @@ class Event(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=("status", "start_at"), name="event_status_start_idx"),
+            models.Index(fields=("organizer", "start_at"), name="event_organizer_start_idx"),
+        ]
+
     @property
     def registered_count(self):
         if "registered_total" in self.__dict__:

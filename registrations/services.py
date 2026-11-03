@@ -1,23 +1,25 @@
+from collections.abc import Callable
 from datetime import timezone as datetime_timezone
+from typing import Any
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from config.exceptions import STATE_ERRORS
 from events.models import Event
-from events.serializers import CancelEventSerializer, EventWriteSerializer
+from events.serializers import EventWriteSerializer
 from registrations.models import Notification, Registration
 
 
 class RegistrationRuleError(Exception):
     """Carries a fixed registration state error code."""
 
-    def __init__(self, code):
+    def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(STATE_ERRORS[code])
 
 
-def notification_message(kind, title, reason=None):
+def notification_message(kind: str, title: str, reason: str | None = None) -> str:
     """Builds a notification message from its event title."""
     templates = {
         "registration_confirmed": "You are registered for {title}.",
@@ -29,7 +31,7 @@ def notification_message(kind, title, reason=None):
     return templates[kind].format(title=title, reason=reason or "")[:255]
 
 
-def _promote_waitlist_locked(event):
+def _promote_waitlist_locked(event: Event) -> None:
     while event.registrations.filter(status=Registration.Status.REGISTERED).count() < event.capacity:
         waiting = event.registrations.filter(
             status=Registration.Status.WAITLISTED
@@ -47,14 +49,20 @@ def _promote_waitlist_locked(event):
         )
 
 
-def promote_waitlisted_registrations(event_id):
+def promote_waitlisted_registrations(event_id: int) -> None:
     """Promotes the oldest waitlisted people while seats remain."""
     with transaction.atomic():
         event = Event.objects.select_for_update().get(pk=event_id)
         _promote_waitlist_locked(event)
 
 
-def register_attendee(attendee, event_id, full_name, phone, note=""):
+def register_attendee(
+    attendee: Any,
+    event_id: int,
+    full_name: str,
+    phone: str,
+    note: str = "",
+) -> Registration:
     """Creates a registration and its confirmation within one event lock."""
     with transaction.atomic():
         event = Event.objects.select_for_update().get(pk=event_id)
@@ -105,7 +113,7 @@ def register_attendee(attendee, event_id, full_name, phone, note=""):
         return registration
 
 
-def cancel_registration(registration_id, attendee_id):
+def cancel_registration(registration_id: int, attendee_id: int) -> Registration:
     """Cancels an attendee registration and fills any freed seat."""
     initial = Registration.objects.get(pk=registration_id, attendee_id=attendee_id)
     with transaction.atomic():
@@ -126,7 +134,7 @@ def cancel_registration(registration_id, attendee_id):
         return registration
 
 
-def cancel_event(event_id, request):
+def cancel_event(event_id: int, validate_reason: Callable[[], str]) -> Event:
     """Cancels an event and closes its open registrations atomically."""
     with transaction.atomic():
         event = Event.objects.select_for_update().get(pk=event_id)
@@ -134,9 +142,7 @@ def cancel_event(event_id, request):
             raise RegistrationRuleError("event_cancelled")
         if event.start_at <= timezone.now():
             raise RegistrationRuleError("event_started")
-        serializer = CancelEventSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        reason = serializer.validated_data["reason"]
+        reason = validate_reason()
         event.status = Event.Status.CANCELLED
         event.cancel_reason = reason
         event.save(update_fields=("status", "cancel_reason", "updated_at"))
@@ -156,7 +162,10 @@ def cancel_event(event_id, request):
         return event
 
 
-def apply_event_edit(event_id, request):
+def apply_event_edit(
+    event_id: int,
+    validate_edit: Callable[[Event], EventWriteSerializer],
+) -> Event:
     """Validates and applies an event edit under the event seat lock."""
     changed_fields = (
         "start_at",
@@ -174,8 +183,7 @@ def apply_event_edit(event_id, request):
         if event.start_at <= timezone.now():
             raise RegistrationRuleError("event_started")
 
-        serializer = EventWriteSerializer(event, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
+        serializer = validate_edit(event)
         values = serializer.validated_data
         new_capacity = values.get("capacity", event.capacity)
         registered_count = event.registrations.filter(
@@ -184,7 +192,7 @@ def apply_event_edit(event_id, request):
         if new_capacity < registered_count:
             raise RegistrationRuleError("capacity_too_low")
 
-        def same_value(field_name, new_value):
+        def same_value(field_name: str, new_value: Any) -> bool:
             old_value = getattr(event, field_name)
             if field_name in ("start_at", "end_at"):
                 return old_value.astimezone(datetime_timezone.utc) == new_value.astimezone(

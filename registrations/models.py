@@ -37,6 +37,16 @@ class Registration(models.Model):
     class Meta:
         """Defines uniqueness for registrations that still hold a place."""
 
+        indexes = [
+            models.Index(
+                fields=("event", "status", "created_at"),
+                name="reg_event_status_created_idx",
+            ),
+            models.Index(
+                fields=("attendee", "created_at"),
+                name="reg_attendee_created_idx",
+            ),
+        ]
         constraints = (
             models.UniqueConstraint(
                 fields=("attendee", "event"),
@@ -79,6 +89,14 @@ class Notification(models.Model):
     message = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=("recipient", "created_at"),
+                name="notif_recipient_created_idx",
+            ),
+        ]
+
 class IdempotencyRecord(models.Model):
     """Stores the first successful answer for a scoped request key."""
 
@@ -103,3 +121,6 @@ class IdempotencyRecord(models.Model):
                 name="unique_idempotency_key_per_user_endpoint",
             ),
         )
+        indexes = [
+            models.Index(fields=("created_at",), name="idempotency_created_idx"),
+        ]
