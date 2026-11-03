@@ -4,6 +4,7 @@ import time
 
 from django.conf import settings
 from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 from config.exceptions import error_response
@@ -29,6 +30,7 @@ def route_label(request):
     return route.lstrip("/")
 
 
+@csrf_exempt
 def metrics_view(request):
     """Return Prometheus metrics when collection is enabled and authorized."""
     if not settings.METRICS_ENABLED:
