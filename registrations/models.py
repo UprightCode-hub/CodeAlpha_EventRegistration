@@ -97,6 +97,7 @@ class Notification(models.Model):
             ),
         ]
 
+
 class IdempotencyRecord(models.Model):
     """Stores the first successful answer for a scoped request key."""
 

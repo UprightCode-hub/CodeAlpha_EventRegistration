@@ -65,6 +65,9 @@ class Event(models.Model):
             models.Index(fields=("organizer", "start_at"), name="event_organizer_start_idx"),
         ]
 
+    registered_total: int
+    waitlist_total: int
+
     @property
     def registered_count(self):
         if "registered_total" in self.__dict__:
