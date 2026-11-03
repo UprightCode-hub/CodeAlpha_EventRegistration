@@ -1,8 +1,8 @@
 """Tests for the Django admin pages of every model."""
 
-from django.conf import settings
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test import TestCase
@@ -72,7 +72,9 @@ class AdminTestBase(TestCase):
             phone="+2348012345678",
         )
 
-    def make_notification(self, person, event, registration=None, kind="registration_confirmed", message="Hello"):
+    def make_notification(
+        self, person, event, registration=None, kind="registration_confirmed", message="Hello"
+    ):
         return Notification.objects.create(
             recipient=person,
             event=event,

@@ -260,7 +260,7 @@ class EventCountTests(RegistrationTestBase):
         self.event = self.make_event(capacity=3)
         people = self.make_attendees(5)
         statuses = ["registered", "registered", "waitlisted", "cancelled", "event_cancelled"]
-        for person, status in zip(people, statuses):
+        for person, status in zip(people, statuses, strict=True):
             self.make_registration(person, self.event, status)
 
     def assert_counts(self, item, registered, waitlist, seats_left):
@@ -308,7 +308,9 @@ class EventCountTests(RegistrationTestBase):
         self.assert_counts(item, registered=2, waitlist=0, seats_left=0)
 
     def test_a_cancelled_event_counts_no_seat_holders(self):
-        called_off = self.make_event(title="Called off", status="cancelled", cancel_reason="Weather")
+        called_off = self.make_event(
+            title="Called off", status="cancelled", cancel_reason="Weather"
+        )
         for person in self.make_attendees(2):
             self.make_registration(person, called_off, "event_cancelled")
         response = self.client.get(f"/api/events/{called_off.id}/")

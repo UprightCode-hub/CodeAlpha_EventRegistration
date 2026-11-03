@@ -121,7 +121,9 @@ class CancelTests(ApiTestBase):
     def test_cancelling_twice_gives_already_cancelled(self):
         self.cancel(self.r1, self.a1)
         response = self.cancel(self.r1, self.a1)
-        self.assert_error(response, 400, "already_cancelled", "This registration is already cancelled.")
+        self.assert_error(
+            response, 400, "already_cancelled", "This registration is already cancelled."
+        )
 
     def test_a_registration_ended_by_the_organizer_gives_already_cancelled(self):
         Registration.objects.filter(pk=self.r1.pk).update(status="event_cancelled")
@@ -139,7 +141,9 @@ class CancelTests(ApiTestBase):
         self.assertEqual(self.status_of(self.r1), "registered")
 
     def test_an_unknown_registration_is_a_404(self):
-        response = self.as_user(self.a1).post("/api/registrations/999999/cancel/", {}, format="json")
+        response = self.as_user(self.a1).post(
+            "/api/registrations/999999/cancel/", {}, format="json"
+        )
         self.assert_error(response, 404, "not_found")
 
     def test_organizer_gets_403(self):
@@ -156,7 +160,9 @@ class CancelTests(ApiTestBase):
         self.assert_error(response, 405, "method_not_allowed")
 
     def test_the_body_is_ignored(self):
-        response = self.as_user(self.a1).post(self.url(self.r1), {"status": "registered"}, format="json")
+        response = self.as_user(self.a1).post(
+            self.url(self.r1), {"status": "registered"}, format="json"
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "cancelled")
 

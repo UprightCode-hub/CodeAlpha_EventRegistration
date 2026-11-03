@@ -35,7 +35,9 @@ class SeedDemoTests(TestCase):
 
     def login(self, username, password=DEMO_PASSWORD):
         client = APIClient()
-        response = client.post("/api/auth/login/", {"username": username, "password": password}, format="json")
+        response = client.post(
+            "/api/auth/login/", {"username": username, "password": password}, format="json"
+        )
         self.assertEqual(response.status_code, 200, response.content)
         client.credentials(HTTP_AUTHORIZATION="Bearer " + response.json()["access"])
         return client
@@ -63,7 +65,7 @@ class SeedDemoTests(TestCase):
         self.assertEqual({event.status for event in events}, {"scheduled"})
         self.assertEqual(Event.objects.count(), 3)
         now = timezone.now()
-        for event, (low, high) in zip(events, ((6, 8), (13, 15), (20, 22))):
+        for event, (low, high) in zip(events, ((6, 8), (13, 15), (20, 22)), strict=True):
             with self.subTest(title=event.title):
                 self.assertGreater(event.start_at, now + timedelta(days=low))
                 self.assertLess(event.start_at, now + timedelta(days=high))
@@ -108,7 +110,9 @@ class SeedDemoTests(TestCase):
         self.assertEqual(sorted(User.objects.values_list("id", flat=True)), user_ids)
         self.assertEqual(sorted(Event.objects.values_list("id", flat=True)), event_ids)
         self.assertEqual(Event.objects.count(), 3)
-        self.assertEqual(User.objects.filter(username__in=["demo_organizer", "demo_attendee"]).count(), 2)
+        self.assertEqual(
+            User.objects.filter(username__in=["demo_organizer", "demo_attendee"]).count(), 2
+        )
 
     def test_a_second_run_does_not_reset_a_password_or_overwrite_an_edit(self):
         self.seed()

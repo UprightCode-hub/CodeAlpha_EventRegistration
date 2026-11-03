@@ -1,4 +1,5 @@
 """Tests for the sign-in lockout, the password length cap and the security log."""
+
 from datetime import timedelta
 from unittest import mock
 
@@ -46,7 +47,9 @@ class SecurityBase(TestCase):
 
     def later(self, seconds):
         """Patch the clock forward for the code under test."""
-        return mock.patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(seconds=seconds))
+        return mock.patch(
+            "django.utils.timezone.now", return_value=timezone.now() + timedelta(seconds=seconds)
+        )
 
 
 class PasswordLengthTests(SecurityBase):
@@ -55,7 +58,12 @@ class PasswordLengthTests(SecurityBase):
     def register(self, password):
         return self.client.post(
             REGISTER,
-            {"username": "longpw", "email": "longpw@example.com", "password": password, "role": "attendee"},
+            {
+                "username": "longpw",
+                "email": "longpw@example.com",
+                "password": password,
+                "role": "attendee",
+            },
             format="json",
         )
 
@@ -196,7 +204,9 @@ class LockoutTests(SecurityBase):
         self.assertEqual(LoginFailure.objects.count(), 1)
 
     def test_a_malformed_body_is_not_a_failure(self):
-        response = self.client.post(LOGIN, "{bad", content_type="application/json", REMOTE_ADDR=IP_A)
+        response = self.client.post(
+            LOGIN, "{bad", content_type="application/json", REMOTE_ADDR=IP_A
+        )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "validation_error")
         self.assertEqual(LoginFailure.objects.count(), 0)
@@ -210,7 +220,12 @@ class LockoutTests(SecurityBase):
         self.fail("ghost", 5)
         response = self.client.post(
             REGISTER,
-            {"username": "newbie", "email": "newbie@example.com", "password": PASSWORD, "role": "attendee"},
+            {
+                "username": "newbie",
+                "email": "newbie@example.com",
+                "password": PASSWORD,
+                "role": "attendee",
+            },
             format="json",
             REMOTE_ADDR=IP_A,
         )

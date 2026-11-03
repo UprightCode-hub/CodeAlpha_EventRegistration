@@ -1,4 +1,4 @@
-"""Tests for reading events: the public list, filters, event detail and an organizer's own events."""
+"""Tests for reading events: the public list, filters, detail and an organizer's own events."""
 
 from datetime import timedelta
 
@@ -17,11 +17,28 @@ EVENTS_URL = "/api/events/"
 MY_EVENTS_URL = "/api/my/events/"
 
 READ_FIELDS = {
-    "id", "title", "description", "category", "event_type", "venue_name",
-    "address", "city", "online_link", "start_at", "end_at",
-    "registration_deadline", "capacity", "registered_count", "seats_left",
-    "waitlist_count", "contact_email", "contact_phone", "organizer_username",
-    "status", "cancel_reason", "created_at",
+    "id",
+    "title",
+    "description",
+    "category",
+    "event_type",
+    "venue_name",
+    "address",
+    "city",
+    "online_link",
+    "start_at",
+    "end_at",
+    "registration_deadline",
+    "capacity",
+    "registered_count",
+    "seats_left",
+    "waitlist_count",
+    "contact_email",
+    "contact_phone",
+    "organizer_username",
+    "status",
+    "cancel_reason",
+    "created_at",
 }
 
 
@@ -202,7 +219,9 @@ class EventFilterTests(ReadTestBase):
         self.assertEqual(titles(self.list(category="workshop")), ["A workshop"])
 
     def test_event_type_filter_is_exact(self):
-        self.make_event(title="Online one", event_type="online", online_link="https://meet.example.com/x")
+        self.make_event(
+            title="Online one", event_type="online", online_link="https://meet.example.com/x"
+        )
         self.make_event(title="In person one", event_type="in_person")
         self.assertEqual(titles(self.list(event_type="online")), ["Online one"])
 
@@ -238,9 +257,7 @@ class EventFilterTests(ReadTestBase):
         day_10 = (base + timedelta(days=10)).date().isoformat()
         self.assertEqual(titles(self.list(starts_after=day_10)), ["Day 10", "Day 20"])
         self.assertEqual(titles(self.list(starts_before=day_10)), ["Day 0", "Day 10"])
-        self.assertEqual(
-            titles(self.list(starts_after=day_10, starts_before=day_10)), ["Day 10"]
-        )
+        self.assertEqual(titles(self.list(starts_after=day_10, starts_before=day_10)), ["Day 10"])
 
     def test_bad_dates_are_validation_errors(self):
         self.assert_field_error(self.list(starts_after="not-a-date"), "starts_after")
@@ -258,9 +275,7 @@ class EventFilterTests(ReadTestBase):
         self.make_event(title="Lagos workshop", city="Lagos", category="workshop")
         self.make_event(title="Lagos meetup", city="Lagos", category="meetup")
         self.make_event(title="Abuja workshop", city="Abuja", category="workshop")
-        self.assertEqual(
-            titles(self.list(city="lagos", category="workshop")), ["Lagos workshop"]
-        )
+        self.assertEqual(titles(self.list(city="lagos", category="workshop")), ["Lagos workshop"])
 
     def test_empty_filter_values_are_ignored(self):
         self.make_event()
@@ -340,9 +355,7 @@ class MyEventsTests(ReadTestBase):
         self.make_event(title="Latest", days=20)
         self.make_event(title="Earliest", days=-5)
         self.client.force_authenticate(user=self.organizer)
-        self.assertEqual(
-            titles(self.client.get(MY_EVENTS_URL)), ["Latest", "Middle", "Earliest"]
-        )
+        self.assertEqual(titles(self.client.get(MY_EVENTS_URL)), ["Latest", "Middle", "Earliest"])
 
     def test_items_use_the_read_fields_and_the_list_is_paged(self):
         for index in range(12):

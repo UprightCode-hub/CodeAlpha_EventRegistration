@@ -1,9 +1,9 @@
 """Tests for the API schema and the Swagger page."""
 
-from django.conf import settings
 import json
 import re
 
+from django.conf import settings
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -133,7 +133,9 @@ class SchemaTestBase(TestCase):
     def setUpTestData(cls):
         response = APIClient().get("/api/schema/", {"format": "json"})
         if response.status_code != 200:
-            raise AssertionError(f"The schema did not load: {response.status_code} {response.content[:300]!r}")
+            raise AssertionError(
+                f"The schema did not load: {response.status_code} {response.content[:300]!r}"
+            )
         cls.schema = json.loads(response.content)
         cls.paths = {normal_path(path): item for path, item in cls.schema.get("paths", {}).items()}
 

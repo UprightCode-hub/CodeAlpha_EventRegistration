@@ -1,4 +1,4 @@
-"""Tests for accounts: register, login, refresh, me, the error format, logging and the Django admin."""
+"""Tests for accounts: register, login, refresh, me, errors, logging and the admin."""
 
 import os
 from unittest.mock import patch
@@ -129,9 +129,7 @@ class RegisterTests(AccountTestBase):
         self.assertFalse(user.is_superuser)
 
     def test_malformed_json_is_a_validation_error(self):
-        response = self.client.post(
-            REGISTER_URL, data="{not json", content_type="application/json"
-        )
+        response = self.client.post(REGISTER_URL, data="{not json", content_type="application/json")
         self.assert_error(response, 400, "validation_error")
 
 
@@ -268,9 +266,7 @@ class AdminTests(TestCase):
         self.assertContains(response, "boss")
 
     def test_regular_user_cannot_open_the_admin(self):
-        User.objects.create_user(
-            username="alice", email="alice@example.com", password=PASSWORD
-        )
+        User.objects.create_user(username="alice", email="alice@example.com", password=PASSWORD)
         self.assertTrue(self.client.login(username="alice", password=PASSWORD))
         response = self.client.get("/" + settings.ADMIN_URL)
         self.assertEqual(response.status_code, 302)

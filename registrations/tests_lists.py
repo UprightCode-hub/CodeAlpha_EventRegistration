@@ -50,7 +50,9 @@ class AttendeeListTests(ApiTestBase):
         tie_b = self.make_registration(self.attendee, self.make_event(title="Tie B"), "registered")
         Registration.objects.filter(pk=old.pk).update(created_at=now - timedelta(hours=5))
         Registration.objects.filter(pk=new.pk).update(created_at=now)
-        Registration.objects.filter(pk__in=[tie_a.pk, tie_b.pk]).update(created_at=now - timedelta(hours=1))
+        Registration.objects.filter(pk__in=[tie_a.pk, tie_b.pk]).update(
+            created_at=now - timedelta(hours=1)
+        )
         self.assertEqual(
             self.ids(self.client.get(LIST_URL)),
             [new.id, tie_b.id, tie_a.id, old.id],
@@ -58,7 +60,9 @@ class AttendeeListTests(ApiTestBase):
 
     def test_the_page_size_is_ten(self):
         for number in range(11):
-            self.make_registration(self.attendee, self.make_event(title=f"Event {number}"), "registered")
+            self.make_registration(
+                self.attendee, self.make_event(title=f"Event {number}"), "registered"
+            )
         first = self.client.get(LIST_URL).json()
         self.assertEqual(first["count"], 11)
         self.assertEqual(len(first["results"]), 10)
@@ -76,7 +80,9 @@ class AttendeeListTests(ApiTestBase):
         held = self.make_registration(self.attendee, self.make_event(title="A"), "registered")
         waiting = self.make_registration(self.attendee, self.make_event(title="B"), "waitlisted")
         gone = self.make_registration(self.attendee, self.make_event(title="C"), "cancelled")
-        called_off = self.make_registration(self.attendee, self.make_event(title="D"), "event_cancelled")
+        called_off = self.make_registration(
+            self.attendee, self.make_event(title="D"), "event_cancelled"
+        )
         cases = {
             "registered": [held.id],
             "waitlisted": [waiting.id],
@@ -192,7 +198,9 @@ class NotificationListTests(ApiTestBase):
         self.client = self.as_user(self.attendee)
         self.event = self.make_event()
 
-    def make_note(self, recipient, kind="promoted", registration=None, event=None, message="Hello."):
+    def make_note(
+        self, recipient, kind="promoted", registration=None, event=None, message="Hello."
+    ):
         return Notification.objects.create(
             recipient=recipient,
             event=event or self.event,
@@ -237,7 +245,9 @@ class NotificationListTests(ApiTestBase):
         tie_b = self.make_note(self.attendee)
         Notification.objects.filter(pk=old.pk).update(created_at=now - timedelta(hours=5))
         Notification.objects.filter(pk=new.pk).update(created_at=now)
-        Notification.objects.filter(pk__in=[tie_a.pk, tie_b.pk]).update(created_at=now - timedelta(hours=1))
+        Notification.objects.filter(pk__in=[tie_a.pk, tie_b.pk]).update(
+            created_at=now - timedelta(hours=1)
+        )
         self.assertEqual(self.ids(self.client.get(self.URL)), [new.id, tie_b.id, tie_a.id, old.id])
 
     def test_the_page_size_is_ten_and_bad_pages_are_404(self):
@@ -298,7 +308,9 @@ class OrganizerRegistrationListTests(ApiTestBase):
         tie_b = self.make_registration(people[3], self.event, "event_cancelled")
         Registration.objects.filter(pk=late.pk).update(created_at=now)
         Registration.objects.filter(pk=early.pk).update(created_at=now - timedelta(hours=5))
-        Registration.objects.filter(pk__in=[tie_a.pk, tie_b.pk]).update(created_at=now - timedelta(hours=1))
+        Registration.objects.filter(pk__in=[tie_a.pk, tie_b.pk]).update(
+            created_at=now - timedelta(hours=1)
+        )
         self.assertEqual(
             self.ids(self.client.get(self.url)),
             [early.id, tie_a.id, tie_b.id, late.id],
@@ -319,7 +331,9 @@ class OrganizerRegistrationListTests(ApiTestBase):
         self.make_registration(self.attendee, self.event, "registered")
         self.make_registration(first, self.event, "waitlisted")
         self.make_registration(second, self.event, "waitlisted")
-        positions = [item["waitlist_position"] for item in self.client.get(self.url).json()["results"]]
+        positions = [
+            item["waitlist_position"] for item in self.client.get(self.url).json()["results"]
+        ]
         self.assertEqual(positions, [None, 1, 2])
 
     def test_registrations_of_other_events_are_not_listed(self):

@@ -1,4 +1,5 @@
 """Tests for the Idempotency-Key header on event create and registration create."""
+
 import json
 import threading
 from datetime import timedelta
@@ -93,7 +94,9 @@ class RegistrationIdempotencyTests(Helpers, TestCase):
         self.event = self.org.post(EVENTS, self.event_body(), format="json").json()
 
     def register(self, client=None, key=None, **over):
-        return self.post(client or self.att, REGISTRATIONS, self.reg_body(self.event["id"], **over), key)
+        return self.post(
+            client or self.att, REGISTRATIONS, self.reg_body(self.event["id"], **over), key
+        )
 
     def test_the_same_key_replays_the_first_answer(self):
         first = self.register(key="k-1")
@@ -118,7 +121,9 @@ class RegistrationIdempotencyTests(Helpers, TestCase):
         self.assertEqual(second.status_code, 422)
         error = second.json()["error"]
         self.assertEqual(error["code"], "idempotency_key_reused")
-        self.assertEqual(error["message"], "This Idempotency-Key was already used with a different request.")
+        self.assertEqual(
+            error["message"], "This Idempotency-Key was already used with a different request."
+        )
         self.assertEqual(Registration.objects.count(), 1)
         self.assertEqual(Registration.objects.get().full_name, "Ada Obi")
 
@@ -190,14 +195,18 @@ class RegistrationIdempotencyTests(Helpers, TestCase):
 
     def test_a_record_is_kept_for_a_day(self):
         self.assertEqual(self.register(key="k-1").status_code, 201)
-        with mock.patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(hours=23)):
+        with mock.patch(
+            "django.utils.timezone.now", return_value=timezone.now() + timedelta(hours=23)
+        ):
             replay = self.register(key="k-1")
         self.assertEqual(replay.status_code, 201)
         self.assertTrue(self.replayed(replay))
 
     def test_a_record_expires_after_a_day(self):
         self.assertEqual(self.register(key="k-1").status_code, 201)
-        with mock.patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(hours=25)):
+        with mock.patch(
+            "django.utils.timezone.now", return_value=timezone.now() + timedelta(hours=25)
+        ):
             again = self.register(key="k-1")
         self.assertEqual(again.status_code, 400)
         self.assertEqual(again.json()["error"]["code"], "already_registered")
@@ -205,13 +214,20 @@ class RegistrationIdempotencyTests(Helpers, TestCase):
 
     def test_the_header_is_ignored_on_other_endpoints(self):
         response = self.org.patch(
-            f"{EVENTS}{self.event['id']}/", {"title": "A new title"}, format="json", HTTP_IDEMPOTENCY_KEY="bad key!"
+            f"{EVENTS}{self.event['id']}/",
+            {"title": "A new title"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="bad key!",
         )
         self.assertEqual(response.status_code, 200)
 
     def test_waitlisted_answers_replay_too(self):
-        small = self.org.post(EVENTS, self.event_body(title="Small one", capacity=1), format="json").json()
-        self.assertEqual(self.post(self.att, REGISTRATIONS, self.reg_body(small["id"]), "k-a").status_code, 201)
+        small = self.org.post(
+            EVENTS, self.event_body(title="Small one", capacity=1), format="json"
+        ).json()
+        self.assertEqual(
+            self.post(self.att, REGISTRATIONS, self.reg_body(small["id"]), "k-a").status_code, 201
+        )
         first = self.post(self.att2, REGISTRATIONS, self.reg_body(small["id"]), "k-b")
         self.assertEqual(first.json()["status"], "waitlisted")
         replay = self.post(self.att2, REGISTRATIONS, self.reg_body(small["id"]), "k-b")
@@ -305,7 +321,9 @@ class Racers:
                 client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
                 barrier.wait()
                 response = client.post(url, body, format="json", HTTP_IDEMPOTENCY_KEY=key)
-                results.append((response.status_code, response.json(), response.headers.get(REPLAY)))
+                results.append(
+                    (response.status_code, response.json(), response.headers.get(REPLAY))
+                )
             except Exception as exc:  # a thread must never die silently
                 results.append(("error", repr(exc), None))
             finally:

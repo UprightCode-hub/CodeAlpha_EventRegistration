@@ -1,4 +1,5 @@
 """Tests for health, database failure answers, the body size limit and the connect timeout."""
+
 import json
 from unittest import mock
 
@@ -33,9 +34,13 @@ class ResilienceBase(TestCase):
 
     def signed_in(self, role="organizer"):
         """Return a client with a valid token, made before any failure is simulated."""
-        User.objects.create_user(username="ada", email="ada@example.com", password=PASSWORD, role=role)
+        User.objects.create_user(
+            username="ada", email="ada@example.com", password=PASSWORD, role=role
+        )
         client = APIClient()
-        token = client.post("/api/auth/login/", {"username": "ada", "password": PASSWORD}, format="json").json()["access"]
+        token = client.post(
+            "/api/auth/login/", {"username": "ada", "password": PASSWORD}, format="json"
+        ).json()["access"]
         client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
         return client
 
@@ -105,7 +110,9 @@ class DatabaseFailureTests(ResilienceBase):
 
     def test_login_answers_503(self):
         with database_down():
-            response = self.client.post("/api/auth/login/", {"username": "ada", "password": PASSWORD}, format="json")
+            response = self.client.post(
+                "/api/auth/login/", {"username": "ada", "password": PASSWORD}, format="json"
+            )
         self.assert_unavailable(response)
 
     def test_an_interface_error_is_also_503(self):
@@ -125,7 +132,9 @@ class DatabaseFailureTests(ResilienceBase):
         self.assertEqual(self.client.get(EVENTS).status_code, 200)
 
     def test_another_unhandled_error_is_still_the_generic_500(self):
-        with mock.patch("django.db.backends.utils.CursorWrapper.execute", side_effect=RuntimeError(SECRET_HOST)):
+        with mock.patch(
+            "django.db.backends.utils.CursorWrapper.execute", side_effect=RuntimeError(SECRET_HOST)
+        ):
             with self.assertLogs("django.request", level="ERROR"):
                 response = self.client.get(EVENTS)
         self.assertEqual(response.status_code, 500)
@@ -190,13 +199,17 @@ class CsrfEnforcedTests(TestCase):
 
     def test_unknown_urls_answer_json_not_found_for_every_method(self):
         for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
-            response = self.client.generic(method, "/api/nothing-here/", "{}", content_type="application/json")
+            response = self.client.generic(
+                method, "/api/nothing-here/", "{}", content_type="application/json"
+            )
             self.assertEqual(response.status_code, 404, method)
             self.assertEqual(response.json()["error"]["code"], "not_found", method)
 
     def test_api_writes_need_no_csrf_token(self):
         response = self.client.post(
-            "/api/auth/login/", {"username": "nobody", "password": "x"}, content_type="application/json"
+            "/api/auth/login/",
+            {"username": "nobody", "password": "x"},
+            content_type="application/json",
         )
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["error"]["code"], "not_authenticated")
@@ -204,5 +217,7 @@ class CsrfEnforcedTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_the_admin_still_checks_csrf(self):
-        response = self.client.post("/" + settings.ADMIN_URL + "login/", {"username": "a", "password": "b"})
+        response = self.client.post(
+            "/" + settings.ADMIN_URL + "login/", {"username": "a", "password": "b"}
+        )
         self.assertEqual(response.status_code, 403)

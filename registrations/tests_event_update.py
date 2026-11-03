@@ -182,7 +182,9 @@ class UpdateNotificationTests(UpdateTestBase):
                 self.assert_attendees_told(event, [self.p1, self.p2])
 
     def test_a_changed_online_link_notifies(self):
-        event = self.make_event(title="Online talk", event_type="online", online_link="https://example.com/a")
+        event = self.make_event(
+            title="Online talk", event_type="online", online_link="https://example.com/a"
+        )
         self.make_registration(self.p1, event, "registered")
         response = self.patch({"online_link": "https://example.com/b"}, event=event)
         self.assertEqual(response.status_code, 200, response.content)
@@ -283,7 +285,13 @@ class UpdateSafetyTests(UpdateTestBase):
         self.assertEqual(Notification.objects.count(), 0)
 
     def test_a_started_event_cannot_be_edited_and_nobody_is_told(self):
-        event = self.started_event(title="Already running", event_type="in_person", venue_name="Hall", address="1 Main", city="Lagos")
+        event = self.started_event(
+            title="Already running",
+            event_type="in_person",
+            venue_name="Hall",
+            address="1 Main",
+            city="Lagos",
+        )
         self.make_registration(self.p1, event, "registered")
         response = self.patch({"city": "Abuja"}, event=event)
         self.assert_error(response, 400, "event_started")

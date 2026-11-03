@@ -1,6 +1,6 @@
 """Tests for creating and editing events."""
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 from datetime import timezone as dt_timezone
 
 from django.contrib.auth import get_user_model
@@ -17,11 +17,28 @@ PASSWORD = "Tr4vel-Mango-Quartz!"
 EVENTS_URL = "/api/events/"
 
 READ_FIELDS = {
-    "id", "title", "description", "category", "event_type", "venue_name",
-    "address", "city", "online_link", "start_at", "end_at",
-    "registration_deadline", "capacity", "registered_count", "seats_left",
-    "waitlist_count", "contact_email", "contact_phone", "organizer_username",
-    "status", "cancel_reason", "created_at",
+    "id",
+    "title",
+    "description",
+    "category",
+    "event_type",
+    "venue_name",
+    "address",
+    "city",
+    "online_link",
+    "start_at",
+    "end_at",
+    "registration_deadline",
+    "capacity",
+    "registered_count",
+    "seats_left",
+    "waitlist_count",
+    "contact_email",
+    "contact_phone",
+    "organizer_username",
+    "status",
+    "cancel_reason",
+    "created_at",
 }
 
 
@@ -151,8 +168,15 @@ class CreateEventTests(EventTestBase):
         self.assert_error(response, 400, "validation_error")
         fields = error_of(response)["fields"]
         for name in (
-            "title", "description", "category", "event_type", "start_at",
-            "end_at", "capacity", "contact_email", "contact_phone",
+            "title",
+            "description",
+            "category",
+            "event_type",
+            "start_at",
+            "end_at",
+            "capacity",
+            "contact_email",
+            "contact_phone",
         ):
             self.assertIn(name, fields)
 
@@ -217,9 +241,7 @@ class CreateEventTests(EventTestBase):
 
     def test_hybrid_event_needs_a_venue_and_a_link(self):
         link = "https://meet.example.com/abc"
-        self.assertEqual(
-            self.create(event_type="hybrid", online_link=link).status_code, 201
-        )
+        self.assertEqual(self.create(event_type="hybrid", online_link=link).status_code, 201)
         self.assert_field_error(self.create(event_type="hybrid"), "online_link")
         self.assert_field_error(
             self.create_without("address", event_type="hybrid", online_link=link), "address"
@@ -237,8 +259,16 @@ class CreateEventTests(EventTestBase):
         )
 
     def test_phone_must_be_international_format(self):
-        for bad in ("08012345678", "+0123456789", "+123", "+23480123456789012",
-                    "phone", "+234 801 234 5678", "+234-801-234-5678", ""):
+        for bad in (
+            "08012345678",
+            "+0123456789",
+            "+123",
+            "+23480123456789012",
+            "phone",
+            "+234 801 234 5678",
+            "+234-801-234-5678",
+            "",
+        ):
             with self.subTest(phone=bad):
                 self.assert_field_error(self.create(contact_phone=bad), "contact_phone")
         self.assertEqual(self.create(contact_phone="+442071234567").status_code, 201)
@@ -292,7 +322,9 @@ class CreateEventTests(EventTestBase):
         )
         self.assertEqual(response.status_code, 201)
         body = response.json()
-        self.assertEqual(parse_datetime(body["registration_deadline"]), parse_datetime(body["start_at"]))
+        self.assertEqual(
+            parse_datetime(body["registration_deadline"]), parse_datetime(body["start_at"])
+        )
 
     def test_deadline_equal_to_the_start_is_accepted(self):
         start = timezone.now() + timedelta(days=30)
@@ -307,7 +339,9 @@ class CreateEventTests(EventTestBase):
         start = (timezone.now() + timedelta(days=30)).replace(tzinfo=None)
         end = start + timedelta(hours=3)
         self.assert_field_error(
-            self.create(start_at=start.isoformat(), end_at=(end.replace(tzinfo=dt_timezone.utc)).isoformat()),
+            self.create(
+                start_at=start.isoformat(), end_at=(end.replace(tzinfo=UTC)).isoformat()
+            ),
             "start_at",
         )
         later = timezone.now() + timedelta(days=30)
@@ -466,9 +500,7 @@ class EditEventTests(EventTestBase):
 
     def test_switching_to_online_with_a_link_is_accepted(self):
         event = self.make_event()
-        response = self.edit(
-            event, event_type="online", online_link="https://meet.example.com/x"
-        )
+        response = self.edit(event, event_type="online", online_link="https://meet.example.com/x")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["event_type"], "online")
 

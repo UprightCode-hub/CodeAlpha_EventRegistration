@@ -6,7 +6,6 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
-from events.models import Event
 from registrations.models import Notification, Registration
 from registrations.tests_helpers import ApiTestBase
 
@@ -90,7 +89,9 @@ class CancelEventTests(ApiTestBase):
         notes = Notification.objects.all()
         self.assertEqual(notes.count(), 3)
         self.assertEqual({note.kind for note in notes}, {"event_cancelled"})
-        self.assertEqual({note.recipient_id for note in notes}, {self.p1.id, self.p2.id, self.p3.id})
+        self.assertEqual(
+            {note.recipient_id for note in notes}, {self.p1.id, self.p2.id, self.p3.id}
+        )
         by_person = {note.recipient_id: note for note in notes}
         self.assertEqual(by_person[self.p1.id].registration, self.r1)
         self.assertEqual(by_person[self.p3.id].registration, self.r3)
@@ -133,7 +134,14 @@ class CancelEventTests(ApiTestBase):
         self.assertEqual(self.cancel({"reason": "x" * 500}).status_code, 200)
 
     def test_bad_reasons_are_validation_errors_and_change_nothing(self):
-        for body in ({}, {"reason": None}, {"reason": ""}, {"reason": "   "}, {"reason": "x" * 501}, {"reason": "bad\x00reason"}):
+        for body in (
+            {},
+            {"reason": None},
+            {"reason": ""},
+            {"reason": "   "},
+            {"reason": "x" * 501},
+            {"reason": "bad\x00reason"},
+        ):
             with self.subTest(body=body):
                 self.assert_field_error(self.cancel(body), "reason")
         self.event.refresh_from_db()
@@ -172,11 +180,15 @@ class CancelEventTests(ApiTestBase):
         self.assertEqual(event.status, "scheduled")
 
     def test_state_errors_come_before_body_validation_and_cancelled_before_started(self):
-        both = self.started_event(title="Cancelled and started", status="cancelled", cancel_reason="Rain")
+        both = self.started_event(
+            title="Cancelled and started", status="cancelled", cancel_reason="Rain"
+        )
         url = f"/api/events/{both.id}/cancel/"
         self.assert_error(self.cancel({}, url=url), 400, "event_cancelled")
         late = self.started_event(title="Started only")
-        self.assert_error(self.cancel({}, url=f"/api/events/{late.id}/cancel/"), 400, "event_started")
+        self.assert_error(
+            self.cancel({}, url=f"/api/events/{late.id}/cancel/"), 400, "event_started"
+        )
 
     def test_anonymous_user_gets_401(self):
         self.assert_error(self.cancel(client=APIClient()), 401, "not_authenticated")
@@ -209,7 +221,8 @@ class CancelEventTests(ApiTestBase):
         default_ids = [item["id"] for item in self.client.get("/api/events/").json()["results"]]
         self.assertNotIn(self.event.id, default_ids)
         cancelled_ids = [
-            item["id"] for item in self.client.get("/api/events/", {"status": "cancelled"}).json()["results"]
+            item["id"]
+            for item in self.client.get("/api/events/", {"status": "cancelled"}).json()["results"]
         ]
         self.assertIn(self.event.id, cancelled_ids)
 

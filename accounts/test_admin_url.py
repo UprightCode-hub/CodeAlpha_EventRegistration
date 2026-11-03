@@ -1,4 +1,5 @@
 """Tests for the admin served at a configurable path instead of /admin/."""
+
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.test import Client, SimpleTestCase, TestCase

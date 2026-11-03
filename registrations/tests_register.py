@@ -141,7 +141,10 @@ class RegisterTests(ApiTestBase):
         people = self.make_attendees(4)
         results = [self.register(client=self.as_user(person)) for person in people]
         self.assertEqual([r.status_code for r in results], [201, 201, 201, 201])
-        self.assertEqual([r.json()["status"] for r in results], ["registered", "registered", "waitlisted", "waitlisted"])
+        self.assertEqual(
+            [r.json()["status"] for r in results],
+            ["registered", "registered", "waitlisted", "waitlisted"],
+        )
         self.assertEqual([r.json()["waitlist_position"] for r in results], [None, None, 1, 2])
         detail = self.client.get(f"/api/events/{self.event.id}/").json()
         self.assertEqual(detail["registered_count"], 2)
@@ -174,7 +177,9 @@ class RegisterTests(ApiTestBase):
     def test_a_passed_deadline_is_refused(self):
         event = self.closed_event(title="Deadline gone")
         response = self.register(event=event.id)
-        self.assert_error(response, 400, "registration_closed", "Registration for this event is closed.")
+        self.assert_error(
+            response, 400, "registration_closed", "Registration for this event is closed."
+        )
         self.assertEqual(Registration.objects.count(), 0)
 
     def test_a_passed_deadline_also_blocks_the_waitlist(self):
@@ -185,7 +190,9 @@ class RegisterTests(ApiTestBase):
         self.assertEqual(event.registrations.count(), 1)
 
     def test_state_errors_are_checked_in_the_agreed_order(self):
-        both = self.started_event(title="Cancelled and started", status="cancelled", cancel_reason="Rain")
+        both = self.started_event(
+            title="Cancelled and started", status="cancelled", cancel_reason="Rain"
+        )
         self.assert_error(self.register(event=both.id), 400, "event_cancelled")
         late = self.started_event(title="Started and closed")
         self.assert_error(self.register(event=late.id), 400, "event_started")
