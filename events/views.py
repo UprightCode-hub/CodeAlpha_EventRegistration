@@ -147,7 +147,7 @@ class EventDetailView(APIView):
             """Validate the edit against the locked event values."""
             serializer = EventWriteSerializer(locked_event, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
-            return serializer
+            return dict(serializer.validated_data)
 
         try:
             updated_event = apply_event_edit(pk, validate_edit)

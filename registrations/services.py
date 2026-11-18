@@ -7,7 +7,6 @@ from django.utils import timezone
 
 from config.exceptions import STATE_ERRORS
 from events.models import Event
-from events.serializers import EventWriteSerializer
 from registrations.models import Notification, Registration
 
 
@@ -166,7 +165,7 @@ def cancel_event(event_id: int, validate_reason: Callable[[], str]) -> Event:
 
 def apply_event_edit(
     event_id: int,
-    validate_edit: Callable[[Event], EventWriteSerializer],
+    validate_edit: Callable[[Event], dict[str, Any]],
 ) -> Event:
     """Validates and applies an event edit under the event seat lock."""
     changed_fields = (
@@ -185,8 +184,7 @@ def apply_event_edit(
         if event.start_at <= timezone.now():
             raise RegistrationRuleError("event_started")
 
-        serializer = validate_edit(event)
-        values = serializer.validated_data
+        values = validate_edit(event)
         new_capacity = values.get("capacity", event.capacity)
         registered_count = event.registrations.filter(status=Registration.Status.REGISTERED).count()
         if new_capacity < registered_count:
@@ -203,7 +201,10 @@ def apply_event_edit(
             for field_name in changed_fields
         )
         old_capacity = event.capacity
-        updated_event = serializer.save()
+        for field_name, value in values.items():
+            setattr(event, field_name, value)
+        event.save(update_fields=(*values, "updated_at"))
+        updated_event = event
 
         if new_capacity > old_capacity:
             promote_waitlisted_registrations(event.pk)
