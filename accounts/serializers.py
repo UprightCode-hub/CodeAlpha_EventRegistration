@@ -2,7 +2,9 @@ from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from rest_framework import serializers
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.tokens import RefreshToken
 
 User = get_user_model()
 
@@ -74,6 +76,50 @@ class RefreshSerializer(serializers.Serializer):
     """Validates a refresh token and returns a new access token."""
 
     refresh = serializers.CharField()
+
+
+class LogoutSerializer(serializers.Serializer):
+    """Validates the refresh token that should be invalidated on logout."""
+
+    refresh = serializers.CharField(write_only=True)
+
+    def validate_refresh(self, value):
+        """Reject an expired, malformed, or already-blacklisted refresh token."""
+        try:
+            RefreshToken(value)
+        except TokenError as exc:
+            raise serializers.ValidationError("Enter a valid refresh token.") from exc
+        return value
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    """Validates a signed-in user's password change."""
+
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False, max_length=128)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False, max_length=128)
+
+    def validate_current_password(self, value):
+        """Require the user's current password before changing it."""
+        if not self.context["request"].user.check_password(value):
+            raise serializers.ValidationError("The current password is incorrect.")
+        return value
+
+    def validate(self, attrs):
+        """Apply Django's configured password-strength validators."""
+        try:
+            password_validation.validate_password(
+                attrs["new_password"], user=self.context["request"].user
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": list(exc.messages)}) from exc
+        return attrs
+
+    def save(self, **kwargs):
+        """Save the validated new password for the signed-in user."""
+        user = self.context["request"].user
+        user.set_password(self.validated_data["new_password"])
+        user.save(update_fields=("password",))
+        return user
 
 
 class LoginCredentialsSerializer(serializers.Serializer):

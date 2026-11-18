@@ -17,6 +17,8 @@ User = get_user_model()
 REGISTER_URL = "/api/auth/register/"
 LOGIN_URL = "/api/auth/login/"
 REFRESH_URL = "/api/auth/refresh/"
+LOGOUT_URL = "/api/auth/logout/"
+PASSWORD_URL = "/api/auth/password/"
 ME_URL = "/api/auth/me/"
 PASSWORD = "Tr4vel-Mango-Quartz!"
 
@@ -188,6 +190,23 @@ class RefreshTests(AccountTestBase):
         response = self.client.post(REFRESH_URL, {"refresh": tokens["refresh"]}, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertIn("access", response.json())
+        self.assertIn("refresh", response.json())
+
+    def test_rotated_refresh_token_cannot_be_reused(self):
+        self.make_user()
+        first = self.tokens()["refresh"]
+        rotated = self.client.post(REFRESH_URL, {"refresh": first}, format="json")
+        self.assertEqual(rotated.status_code, 200)
+        self.assert_error(
+            self.client.post(REFRESH_URL, {"refresh": first}, format="json"),
+            401,
+            "not_authenticated",
+        )
+        rotated_refresh = rotated.json()["refresh"]
+        self.assertEqual(
+            self.client.post(REFRESH_URL, {"refresh": rotated_refresh}, format="json").status_code,
+            200,
+        )
 
     def test_garbage_refresh_token_is_401(self):
         response = self.client.post(REFRESH_URL, {"refresh": "not-a-token"}, format="json")
@@ -198,6 +217,51 @@ class RefreshTests(AccountTestBase):
         tokens = self.tokens()
         response = self.client.post(REFRESH_URL, {"refresh": tokens["access"]}, format="json")
         self.assert_error(response, 401, "not_authenticated")
+
+
+class TokenRevocationTests(AccountTestBase):
+    """Checks logout and password changes revoke refresh tokens."""
+
+    def authenticated_client(self, access):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + access)
+        return self.client
+
+    def test_logout_blacklists_the_submitted_refresh_token(self):
+        self.make_user()
+        tokens = self.tokens()
+        response = self.authenticated_client(tokens["access"]).post(
+            LOGOUT_URL, {"refresh": tokens["refresh"]}, format="json"
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assert_error(
+            self.client.post(REFRESH_URL, {"refresh": tokens["refresh"]}, format="json"),
+            401,
+            "not_authenticated",
+        )
+
+    def test_password_change_revokes_access_and_refresh_tokens(self):
+        self.make_user()
+        tokens = self.tokens()
+        client = self.authenticated_client(tokens["access"])
+        new_password = "N3w-Travel-Mango-Quartz!"
+        response = client.post(
+            PASSWORD_URL,
+            {"current_password": PASSWORD, "new_password": new_password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assert_error(client.get(ME_URL), 401, "not_authenticated")
+        self.assert_error(
+            self.client.post(REFRESH_URL, {"refresh": tokens["refresh"]}, format="json"),
+            401,
+            "not_authenticated",
+        )
+        login = self.client.post(
+            LOGIN_URL, {"username": "alice", "password": new_password}, format="json"
+        )
+        self.assertEqual(
+            login.status_code, 200
+        )
 
 
 class MeTests(AccountTestBase):

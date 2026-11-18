@@ -1,15 +1,25 @@
-from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
+from django.db import transaction
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+    inline_serializer,
+)
 from rest_framework import generics, serializers, status
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from accounts.security import blocking_seconds, clear_failures, log_blocked, record_failure
 from accounts.serializers import (
     LoginCredentialsSerializer,
     LoginSerializer,
+    LogoutSerializer,
+    PasswordChangeSerializer,
     RefreshSerializer,
     RegisterSerializer,
     UserSerializer,
@@ -96,7 +106,8 @@ class LoginView(TokenObtainPairView):
         request=RefreshSerializer,
         responses={
             200: inline_serializer(
-                name="AccessTokenResponse", fields={"access": serializers.CharField()}
+                name="RotatedTokenPairResponse",
+                fields={"access": serializers.CharField(), "refresh": serializers.CharField()},
             )
         },
         auth=[],
@@ -121,3 +132,53 @@ class MeView(APIView):
     def get(self, request):
         """Return the requested data."""
         return Response(UserSerializer(request.user).data)
+
+
+class LogoutView(APIView):
+    """Invalidates an authenticated user's submitted refresh token."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "write"
+
+    @extend_schema(
+        summary="Log out and invalidate a refresh token",
+        request=LogoutSerializer,
+        responses={204: OpenApiResponse(description="Refresh token invalidated.")},
+        auth=BEARER_AUTH,
+    )
+    def post(self, request):
+        """Blacklist the submitted refresh token when it belongs to the signed-in user."""
+        serializer = LogoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        refresh = RefreshToken(serializer.validated_data["refresh"])
+        if str(refresh["user_id"]) != str(request.user.pk):
+            return error_response("permission_denied")
+        refresh.blacklist()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PasswordChangeView(APIView):
+    """Changes a password and revokes all outstanding refresh tokens."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "write"
+
+    @extend_schema(
+        summary="Change the signed-in user's password",
+        request=PasswordChangeSerializer,
+        responses={
+            204: OpenApiResponse(description="Password changed and refresh tokens revoked."),
+        },
+        auth=BEARER_AUTH,
+    )
+    def post(self, request):
+        """Change the password and blacklist all refresh tokens atomically."""
+        serializer = PasswordChangeSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            serializer.save()
+            for token in OutstandingToken.objects.filter(user=request.user):
+                BlacklistedToken.objects.get_or_create(token=token)
+        return Response(status=status.HTTP_204_NO_CONTENT)
