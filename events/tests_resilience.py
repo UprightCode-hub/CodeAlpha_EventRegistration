@@ -6,6 +6,7 @@ from unittest import mock
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import InterfaceError, OperationalError
+from django.http import HttpResponse
 from django.test import Client, RequestFactory, TestCase
 from rest_framework.test import APIClient
 
@@ -189,19 +190,32 @@ class BodySizeTests(ResilienceBase):
         response = self.post_raw(self.client, self.padded(LIMIT + 1), url="/api/auth/login/")
         self.assertEqual(response.status_code, 413)
 
-    def test_a_request_without_content_length_is_refused(self):
-        request = RequestFactory().generic("POST", EVENTS, "{}", content_type="application/json")
-        del request.META["CONTENT_LENGTH"]
-        response = BodySizeLimitMiddleware(lambda request: None)(request)
+    def test_bodyless_write_requests_without_content_length_pass_through(self):
+        middleware = BodySizeLimitMiddleware(lambda request: HttpResponse(status=204))
+        for method in ("POST", "PUT", "PATCH", "DELETE"):
+            with self.subTest(method=method):
+                request = RequestFactory().generic(method, EVENTS)
+                request.META.pop("CONTENT_LENGTH", None)
+                self.assertEqual(middleware(request).status_code, 204)
+
+    def test_transfer_encoding_is_refused(self):
+        request = RequestFactory().generic("POST", EVENTS)
+        request.META["HTTP_TRANSFER_ENCODING"] = "chunked"
+        response = BodySizeLimitMiddleware(lambda request: HttpResponse(status=204))(request)
         self.assertEqual(response.status_code, 413)
         self.assertEqual(json.loads(response.content)["error"]["code"], "payload_too_large")
 
-    def test_an_invalid_content_length_is_refused(self):
-        request = RequestFactory().generic("POST", EVENTS, "{}", content_type="application/json")
-        request.META["CONTENT_LENGTH"] = "not-a-number"
-        response = BodySizeLimitMiddleware(lambda request: None)(request)
-        self.assertEqual(response.status_code, 413)
-        self.assertEqual(json.loads(response.content)["error"]["code"], "payload_too_large")
+    def test_invalid_content_lengths_are_refused(self):
+        middleware = BodySizeLimitMiddleware(lambda request: HttpResponse(status=204))
+        for content_length in ("not-a-number", "-1", str(LIMIT + 1)):
+            with self.subTest(content_length=content_length):
+                request = RequestFactory().generic(
+                    "POST", EVENTS, "{}", content_type="application/json"
+                )
+                request.META["CONTENT_LENGTH"] = content_length
+                response = middleware(request)
+                self.assertEqual(response.status_code, 413)
+                self.assertEqual(json.loads(response.content)["error"]["code"], "payload_too_large")
 
     def test_normal_requests_are_not_affected(self):
         client = self.signed_in()

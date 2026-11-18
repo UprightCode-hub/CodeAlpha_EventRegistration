@@ -65,9 +65,11 @@ class BodySizeLimitMiddleware:
         if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
             return self.get_response(request)
 
+        if request.META.get("HTTP_TRANSFER_ENCODING"):
+            return error_response("payload_too_large")
         content_length = request.META.get("CONTENT_LENGTH")
         if content_length in (None, ""):
-            return error_response("payload_too_large")
+            return self.get_response(request)
         try:
             body_size = int(content_length)
         except (TypeError, ValueError):

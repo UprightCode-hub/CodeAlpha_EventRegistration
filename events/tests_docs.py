@@ -11,6 +11,8 @@ EXPECTED = {
     ("/api/auth/register/", "post"): "201",
     ("/api/auth/login/", "post"): "200",
     ("/api/auth/refresh/", "post"): "200",
+    ("/api/auth/logout/", "post"): "204",
+    ("/api/auth/password/", "post"): "204",
     ("/api/auth/me/", "get"): "200",
     ("/api/events/", "get"): "200",
     ("/api/events/", "post"): "201",
@@ -75,6 +77,8 @@ REQUEST_FIELDS = {
     ("/api/auth/register/", "post"): {"username", "email", "password", "role"},
     ("/api/auth/login/", "post"): {"username", "password"},
     ("/api/auth/refresh/", "post"): {"refresh"},
+    ("/api/auth/logout/", "post"): {"refresh"},
+    ("/api/auth/password/", "post"): {"current_password", "new_password"},
     ("/api/events/", "post"): EVENT_BODY,
     ("/api/events/{id}/", "patch"): EVENT_BODY,
     ("/api/events/{id}/cancel/", "post"): {"reason"},
@@ -273,6 +277,8 @@ class SchemaContentTests(SchemaTestBase):
         self.assertTrue(bearer)
         protected = (
             ("/api/auth/me/", "get"),
+            ("/api/auth/logout/", "post"),
+            ("/api/auth/password/", "post"),
             ("/api/events/", "post"),
             ("/api/events/{id}/cancel/", "post"),
             ("/api/registrations/", "post"),

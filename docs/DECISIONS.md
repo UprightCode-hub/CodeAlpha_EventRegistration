@@ -9,20 +9,20 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Why:** Every permission depends on the role, and it is cheap to set up before the first migration and painful to add later.
 - **What breaks if changed:** Role checks would need a second source of truth, and `createsuperuser` would ask for a role.
 
-- **Decision:** Email is stored in lowercase and is unique ignoring case.
+- **Decision:** Email is stored in lowercase and is unique ignoring case. Usernames are trimmed, stored in lowercase when registered publicly, and protected by a PostgreSQL `Lower("username")` unique constraint.
 - **Alternative rejected:** Compare emails exactly as typed.
-- **Why:** `Ada@x.com` and `ada@x.com` are the same person, and two accounts would split their registrations.
-- **What breaks if changed:** One person could hold two accounts and two seats.
+- **Why:** `Ada@x.com` and `ada@x.com`, or `Alice` and `alice`, identify the same account. The database constraint remains correct when two registration requests race.
+- **What breaks if changed:** One person could hold two accounts and two seats, or a concurrent duplicate registration could escape validation.
 
-- **Decision:** The role is chosen at registration, and staff rights can never be set through the API.
-- **Alternative rejected:** An approval stage before someone becomes an organizer.
-- **Why:** Approval needs an admin workflow that is outside this project. The cost is that anyone can become an organizer, and I list it under known gaps.
-- **What breaks if changed:** Registration would need a pending state and an approval endpoint.
+- **Decision:** Public registration always creates an attendee. Only staff can promote a user to organizer through Django Admin, and staff rights cannot be set through the API.
+- **Alternative rejected:** Let clients choose a role during registration.
+- **Why:** A public request must not grant event-management privileges. Django Admin already supplies a staff-protected promotion workflow.
+- **What breaks if changed:** Any anonymous client could create an organizer account.
 
-- **Decision:** Login returns a refresh token, and a refresh endpoint consumes it.
-- **Alternative rejected:** Return a refresh token that nothing uses.
-- **Why:** A token that cannot be used is only confusing. Short access tokens are safer when they can be renewed.
-- **What breaks if changed:** Users would have to sign in again every 30 minutes.
+- **Decision:** Login returns access and refresh tokens. Refresh tokens rotate and are blacklisted after use; logout blacklists the submitted refresh token; changing a password blacklists all outstanding refresh tokens and invalidates access tokens carrying the prior password hash.
+- **Alternative rejected:** Reusable refresh tokens with no logout or password-change revocation.
+- **Why:** A lost refresh token should stop working after rotation or logout, and changing a password must end existing sessions.
+- **What breaks if changed:** A stolen refresh token could be reused until it expires, and old sessions could survive a password change.
 
 - **Decision:** Every error uses one JSON shape with a code and a plain sentence. Validation errors add a `fields` object. A wrong password and an unknown username give the same answer.
 - **Alternative rejected:** Return serializer output or exception text, or say which of the two was wrong.
@@ -113,10 +113,10 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 
 ## Registrations and seats
 
-- **Decision:** Seats are protected by a lock on the event row inside a transaction. Registering, cancelling, promoting, changing capacity and calling the event off all take the same lock.
+- **Decision:** Seats are protected by a PostgreSQL `select_for_update()` lock on the event row inside a transaction. Registering, cancelling, promoting, changing capacity and calling the event off all take the same lock.
 - **Alternative rejected:** Count registrations and then insert, with no lock.
-- **Why:** If 49 of 50 seats are taken and two people register at the same moment, both can see one free seat and both pass the check. One lock makes the second request wait and then see the real count.
-- **What breaks if changed:** A 50 seat event could end with 51 people.
+- **Why:** If 49 of 50 seats are taken and two people register at the same moment, both can see one free seat and both pass the check. PostgreSQL makes the second lock request wait, then read the real count. SQLite is not an equivalent test or production backend for this guarantee.
+- **What breaks if changed:** A 50 seat event could end with 51 people, or an unsupported database could give false confidence in concurrency tests.
 
 - **Decision:** One open registration per attendee and event, enforced by a conditional unique constraint that applies only while the status is `registered` or `waitlisted`.
 - **Alternative rejected:** Check in code only, or one unique row per attendee and event.
@@ -192,9 +192,9 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Why:** A client that loses the answer to a registration cannot tell whether it worked, and a blind retry would be refused or double the change. Storing the key in the database, in the same transaction, means the key and the change are saved together or not at all. The unique constraint on user, endpoint and key is what makes two simultaneous requests run the change once, because the second insert waits for the first. A cache would add a service and could lose a key that the database still had a change for. Cancels and edits are already safe to repeat, so they do not take a key.
 - **What breaks if changed:** A retried request could create a second event, or the stored key and the change could disagree after a crash.
 
-- **Decision:** Requests with a body over 1 MB are refused with a 413 before authentication, by a middleware that reads the `Content-Length` header.
+- **Decision:** Requests with an invalid or oversized `Content-Length`, or any `Transfer-Encoding` header, are refused with a 413 before authentication. Django's in-memory upload limits match the 1 MB limit, and production proxies must enforce an equivalent limit.
 - **Alternative rejected:** No limit, or a limit in the web server only.
-- **Why:** Django does not enforce a size limit on the JSON bodies the API parses, and the development server has no limit of its own. A middleware refuses the request before any other work is done. It reads only the declared length, so a request that sends no length is not caught here.
+- **Why:** Django does not enforce a size limit on the JSON bodies the API parses, and the development server has no limit of its own. The middleware refuses an unbounded body before any other work; a reverse proxy such as Nginx must also set `client_max_body_size` in production.
 - **What breaks if changed:** One request could send a very large body and use the server's memory.
 
 - **Decision:** A database failure answers 503 `service_unavailable` with `Retry-After: 5` and no exception text. The traceback goes to the server log at error level. Every other unhandled error stays the generic 500. The database connection times out after 5 seconds.
@@ -214,15 +214,15 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Why:** A system that collects logs can search JSON by field, and the request id ties together the access line, an error and a sign-in warning from one request. Leaving out query strings and headers keeps secrets out of the log. A test collects every record the request loggers emit while a wrong password and a bad token are sent, and checks that neither appears in any form.
 - **What breaks if changed:** Logs would be harder to search, and a secret in a query string could end up in them.
 
-- **Decision:** `GET /metrics` exposes request counts and durations in the Prometheus format. It is off unless `METRICS_ENABLED` is true, and an optional `METRICS_TOKEN` requires a bearer token. When it is off, every method answers the JSON `not_found`, like an unknown URL. The route is exempt from the CSRF check, it is not counted in its own numbers and it is not in the schema. Unknown URLs share one `unmatched` label.
+- **Decision:** `GET /metrics` exposes request counts and durations in the Prometheus format. It is off unless `METRICS_ENABLED` is true; enabling it requires a nonblank `METRICS_TOKEN`, and every request requires that bearer token. When it is off, every method answers the JSON `not_found`, like an unknown URL. The route is exempt from the CSRF check, it is not counted in its own numbers and it is not in the schema. Unknown URLs share one `unmatched` label.
 - **Alternative rejected:** A public metrics route, or labels that include the raw path.
 - **Why:** A metrics page shows traffic and error rates to anyone who can reach it, so it is closed by default. Using the matched route as the label keeps the number of label values fixed. A client cannot create new ones by asking for random paths. The CSRF exemption came from the smoke test: the route passed its tests, but a real POST got Django's HTML 403 page, which for a disabled route would have told a scanner that the path exists. A test with a client that enforces the CSRF check now covers it.
 - **What breaks if changed:** An open metrics route would leak traffic details, raw paths would grow the metrics without limit, and without the exemption a disabled route would stand out from an unknown URL.
 
-- **Decision:** Chosen endpoints are rate limited, and signed-in users get a higher limit than anonymous clients. The scopes are sign-in, register, the public event list and detail, and the write operations (create, edit and cancel an event, create and cancel a registration). Signed-in users are counted by user id and everyone else by the connecting address only, and the `X-Forwarded-For` header is ignored. Each scope is counted separately, and endpoints that share a scope share one count. A request counts whether it succeeds or fails, but one refused earlier as unauthenticated or forbidden is not counted. The answer is 429 `too_many_requests` with `Retry-After`. Refresh, `me`, the private lists, notifications, health, metrics, the schema and the admin are not limited.
+- **Decision:** Chosen endpoints are rate limited, and signed-in users get a higher limit than anonymous clients. The scopes are sign-in, register, the public event list and detail, and write operations. Signed-in users are counted by user id and everyone else by the connecting address only, and the `X-Forwarded-For` header is ignored. Each scope is counted separately, and endpoints that share a scope share one count. A request counts whether it succeeds or fails, but one refused earlier as unauthenticated or forbidden is not counted. The answer is 429 `too_many_requests` with `Retry-After`. Refresh, `me`, the private lists, notifications, health, metrics, the schema and the admin are not limited.
 - **Alternative rejected:** One global limit, trusting `X-Forwarded-For`, or no limits beyond the sign-in lockout.
-- **Why:** The limited endpoints are the ones attackers and crawlers hit first. A header the client controls would let anyone pick a new address for each request. The sign-in lockout stays as it is, with its own error code `too_many_attempts`, because it answers a different question: too many wrong passwords, not too many requests. The rates are read from settings on every request, so tests and deployments can change them.
-- **What breaks if changed:** Trusting the forwarded header would make the limit meaningless, and one shared count for everything would let a busy reader block someone who only wants to sign in.
+- **Why:** The limited endpoints are the ones attackers and crawlers hit first. A header the client controls would let anyone pick a new address for each request. The sign-in lockout stays as it is, with its own error code `too_many_attempts`, because it answers a different question: too many wrong passwords, not too many requests. The rates are read from settings on every request, so tests and deployments can change them. The current `LocMemCache` implementation is valid only for one application process; multi-worker deployments require a shared Redis cache.
+- **What breaks if changed:** Trusting the forwarded header would make the limit meaningless, one shared count for everything would let a busy reader block someone who only wants to sign in, and local memory would let each worker apply a different limit.
 
 - **Decision:** Throttling is on by default and off by default while the test command runs. A `THROTTLING_ENABLED` value in the environment overrides either. The throttle tests switch it on themselves and set small rates.
 - **Alternative rejected:** Leave it on during all tests, or keep it off everywhere unless set.
@@ -301,8 +301,7 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 
 - No payments. Events are free.
 - No guests per registration.
-- No logout or token blacklist.
-- Rate limits cover the sign-in, register, public read and write endpoints. Their counts are kept in Django's default local memory cache, in one server process, so several workers would each have their own and a shared cache would be needed.
+- Rate limits cover the sign-in, register, public read and write endpoints. Their counts are kept in Django's default local memory cache, in one server process, so several workers would each have their own and a shared Redis cache is required before scaling out.
 - The metrics are kept in the memory of one server process.
 - The metrics route has a token but no network restriction, so a real deployment should keep it on a private network.
 - Behind a proxy every anonymous client shares one connecting address, so the anonymous rate limits would apply to all of them together.
@@ -310,10 +309,9 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - The Django admin sign-in has no lockout.
 - The hidden admin path keeps out scans of `/admin/` and is not access control.
 - Expired idempotency records are deleted only when their key is seen again, so a cleanup job would be needed at scale.
-- Django limits in-memory uploads to `MAX_REQUEST_BODY_BYTES`, and body-bearing requests without a valid `Content-Length` are refused. A production reverse proxy must also enforce an equivalent body limit, such as Nginx `client_max_body_size`.
+- Django limits in-memory uploads to `MAX_REQUEST_BODY_BYTES`; requests with an invalid or oversized `Content-Length`, or any `Transfer-Encoding` header, are refused. A production reverse proxy must also enforce an equivalent body limit, such as Nginx `client_max_body_size`.
 - No CORS headers, so a browser frontend on another address would be blocked.
 - Notifications are in the app only. Nothing is sent by email.
-- Anyone can register as an organizer.
 - A promoted waitlist attendee has no confirmation window.
 - Changes made in the admin bypass the seat rules.
 - The Swagger page needs an internet connection.
@@ -322,7 +320,7 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 ## If this grew 10x
 
 - Send notifications and emails from a background worker, with retries.
-- Keep the rate limit counts in a shared cache, and run the metrics in the library's multiprocess mode, so that several workers agree.
+- Keep the rate limit counts in Redis, and run the metrics in the library's multiprocess mode, so that several workers agree.
 - Take the client address from a trusted proxy header that the proxy sets, not from the client.
 - Cache only the event data that changes slowly, after measuring, and keep seat counts out of any cache.
 - Add async views only where a slow outside call, such as sending email, makes the wait real.

@@ -8,7 +8,7 @@ See [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the system architecture diagra
 
 ## Features
 
-- Register and sign in as an organizer or an attendee, with JWT access and refresh tokens.
+- Register as an attendee or manage organizer accounts through Django Admin, with JWT access and refresh tokens.
 - Create, edit, cancel, list, search and filter events.
 - Register for an event, cancel a registration, and see your registrations.
 - Fixed seats, a first come first served waitlist, and automatic promotion when a seat is freed or capacity is raised.
@@ -47,7 +47,7 @@ The exact versions are pinned in `requirements.txt` and `requirements-dev.txt`.
 
    To run the tests and the code checks as well, also install `pip install -r requirements-dev.txt`.
 
-3. Create a PostgreSQL user and database. The user needs `CREATEDB`, because the tests create their own database called `test_eventreg`.
+3. Create a PostgreSQL user and database. PostgreSQL is required: the seat-allocation transaction relies on `select_for_update()` row locking, and usernames use a `Lower("username")` functional unique constraint. The user needs `CREATEDB`, because the tests create their own database called `test_eventreg`.
 
    ```sql
    CREATE USER eventreg_user WITH PASSWORD 'choose-a-password' CREATEDB;
@@ -72,7 +72,7 @@ The exact versions are pinned in `requirements.txt` and `requirements-dev.txt`.
    | `DB_PORT` | PostgreSQL port. | `5432` |
    | `ADMIN_URL` | The path the Django admin is served at. See the next section. | `eventreg-manage/` |
    | `METRICS_ENABLED` | Set to `True` to turn on the `/metrics` route. | off |
-   | `METRICS_TOKEN` | When set, `/metrics` needs `Authorization: Bearer <token>`. | empty |
+   | `METRICS_TOKEN` | Required when metrics are enabled; `/metrics` needs `Authorization: Bearer <token>`. | empty |
    | `THROTTLING_ENABLED` | Rate limits. Only the exact value `True` turns them on. | on, except while the tests run |
 
    Use `DEBUG=True` for local work. There is no static file setup, so this project is for local use and is not set up for production.
@@ -130,7 +130,9 @@ Open [http://127.0.0.1:8000/api/docs/](http://127.0.0.1:8000/api/docs/) and try 
 |---|---|---|---|
 | POST | `/api/auth/register/` | Public | Create an account. |
 | POST | `/api/auth/login/` | Public | Sign in and receive access and refresh tokens. |
-| POST | `/api/auth/refresh/` | Public | Exchange a refresh token for a new access token. |
+| POST | `/api/auth/refresh/` | Public | Rotate a refresh token and receive a new access/refresh pair. |
+| POST | `/api/auth/logout/` | Signed in | Blacklist the submitted refresh token. |
+| POST | `/api/auth/password/` | Signed in | Change the password and revoke outstanding refresh tokens. |
 | GET | `/api/auth/me/` | Signed in | Read the signed in account. |
 | GET | `/api/events/` | Public | List and filter events. |
 | POST | `/api/events/` | Organizer | Create an event. Accepts `Idempotency-Key`. |
@@ -160,7 +162,7 @@ Someone else's event or registration answers 404, not 403, so ids of other peopl
 | `username` | Required, up to 150 characters, unique ignoring letter case. |
 | `email` | Required, valid email, unique ignoring letter case, stored in lowercase. |
 | `password` | Required, up to 128 characters, must pass Django's password validators. |
-| `role` | Required, `organizer` or `attendee`. |
+| `role` | Ignored on public registration; new accounts are always attendees. Staff promote organizers in Django Admin. |
 
 ### Create or edit an event
 
@@ -204,7 +206,6 @@ $body = @{
   username = $env:NEW_USERNAME
   email = $env:NEW_EMAIL
   password = $env:NEW_PASSWORD
-  role = "attendee"
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post `
@@ -317,7 +318,7 @@ flowchart TD
     J --> K[Commit]
 ```
 
-Registering, cancelling, promoting, changing capacity and cancelling an event all take the same lock on the event row, so two requests for the last seat cannot both succeed.
+Registering, cancelling, promoting, changing capacity and cancelling an event all take the same PostgreSQL lock on the event row, so two requests for the last seat cannot both succeed. SQLite or another database backend is not a supported substitute for this concurrency guarantee.
 
 ## Notifications
 
@@ -356,7 +357,7 @@ A few endpoints are limited per minute, apart from the lockout above. Signed in 
 | `login` | `POST /api/auth/login/` | 20 per minute | 60 per minute |
 | `register` | `POST /api/auth/register/` | 10 per minute | 30 per minute |
 | `public_read` | `GET /api/events/` and `GET /api/events/<id>/` | 60 per minute | 240 per minute |
-| `write` | Create, edit and cancel an event. Create and cancel a registration. | 30 per minute | 120 per minute |
+| `write` | Create, edit and cancel an event; create and cancel a registration; log out and change a password. | 30 per minute | 120 per minute |
 
 These are the defaults in `THROTTLE_RATES` in `config/settings.py`. Refresh, `me`, the private lists, notifications, health, metrics, the schema and the admin are not limited. A request refused as unauthenticated or forbidden is not counted.
 
@@ -368,14 +369,14 @@ To see it, start the server normally and run `GET /api/events/` more than 60 tim
 1..70 | ForEach-Object { (Invoke-WebRequest http://127.0.0.1:8000/api/events/ -SkipHttpErrorCheck).StatusCode } | Group-Object | Select-Object Name, Count
 ```
 
-The counts are kept in Django's default local memory cache, so they belong to one server process. Set `THROTTLING_ENABLED=False` to turn the limits off, which the live test scripts below need.
+The counts are kept in Django's default `LocMemCache`, so they belong to one server process. Before running multiple application workers, replace it with a shared Redis cache (and configure Django's cache backend accordingly), otherwise each worker enforces a separate limit. Set `THROTTLING_ENABLED=False` to turn the limits off, which the live test scripts below need.
 
 ## Logs, request ids and metrics
 
 - Every log line is one JSON object with `timestamp`, `level`, `logger`, `event`, any extra fields, and `request_id` while a request is handled. A traceback goes into an `exception` field, and is never sent in an answer.
 - Every answer carries an `X-Request-ID` header. A valid value from the client (1 to 64 letters, digits, `-` or `_`) is kept. Anything else is replaced by a new 32 character id.
 - One `api.access` line is written per request with the method, the path, the status, `duration_ms` and `user_id`. The query string, bodies, the `Authorization` header, passwords and tokens are never logged.
-- `GET /metrics` shows `http_requests_total` and `http_request_duration_seconds` in the Prometheus text format, labelled by method, route and status. It is off unless `METRICS_ENABLED=True`, and then every method answers the JSON `not_found`. With `METRICS_TOKEN` set it also needs the bearer token. Unknown URLs share the route label `unmatched`.
+- `GET /metrics` shows `http_requests_total` and `http_request_duration_seconds` in the Prometheus text format, labelled by method, route and status. It is off unless `METRICS_ENABLED=True`, and then every method answers the JSON `not_found`. Enabling it requires `METRICS_TOKEN`; every request must supply its bearer token. Unknown URLs share the route label `unmatched`.
 
 To look at the metrics:
 

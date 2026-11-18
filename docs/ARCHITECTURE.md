@@ -52,7 +52,7 @@ flowchart LR
     Swagger[Swagger UI]
     WSGI[WSGI entrypoint]
     ASGI[ASGI entrypoint]
-    Middleware[Request middleware<br/>request id, metrics, body-size limit and JSON exception handling]
+    Middleware[Request middleware<br/>request id, metrics, Content-Length/Transfer-Encoding limit and JSON exception handling]
     Metrics[Prometheus metrics route<br/>off unless enabled]
     Logs[JSON logs<br/>access line per request]
     Router[Django URL router]
@@ -109,7 +109,7 @@ flowchart LR
 | `pyproject.toml`, `requirements-dev.txt` | Settings and packages for Ruff, mypy and coverage. |
 | `events/management/commands/seed_demo.py` | Repeatable demo-data command. |
 
-`manage.py` is the development and administrative command entrypoint. `config.wsgi` and `config.asgi` are the server entrypoints. Runtime settings come from environment variables; PostgreSQL is the configured database. The admin path is configurable, while the API schema and Swagger UI are public. `/metrics` always exists but answers the JSON `not_found` unless `METRICS_ENABLED` is true.
+`manage.py` is the development and administrative command entrypoint. `config.wsgi` and `config.asgi` are the server entrypoints. Runtime settings come from environment variables; PostgreSQL is required, not merely configured: event-row locks use `select_for_update()` and username identity uses a `Lower("username")` functional unique constraint. The admin path is configurable, while the API schema and Swagger UI are public. `/metrics` always exists but answers the JSON `not_found` unless `METRICS_ENABLED` is true.
 
 ## Main data relationships
 
@@ -194,11 +194,11 @@ Event edits that change a time, venue, format, or location notify registered and
 
 1. The request-id middleware runs first. It keeps a valid `X-Request-ID` from the client or makes a new one, binds it to every log line of the request, and adds it to the answer, including errors and the 413.
 2. The metrics middleware times the request and records a counter and a histogram under the matched route, or `unmatched`. It skips `/metrics` itself.
-3. The body-size middleware rejects oversized declared request bodies before authentication.
+3. The body-size middleware rejects requests with an invalid or oversized `Content-Length`, or any `Transfer-Encoding` header, before authentication.
 4. Django routes the request to the relevant API, admin, health, schema, metrics or documentation view.
-5. DRF applies JWT authentication and endpoint-specific role/ownership checks, and only then the rate limit for that endpoint, so a 401 or 403 is answered before anything is counted. A passed limit answers 429. The public API returns JSON errors through the shared exception handler.
+5. DRF applies JWT authentication and endpoint-specific role/ownership checks, and only then the rate limit for that endpoint, so a 401 or 403 is answered before anything is counted. A passed limit answers 429. The rate-limit cache is local to one process; deployments with multiple workers must use a shared Redis cache. The public API returns JSON errors through the shared exception handler.
 6. Create endpoints may wrap the business operation in database-backed idempotency handling. Repeating the same key and body replays the first successful response; a different body is rejected.
-7. Registration and event lifecycle services use database transactions and an event-row lock to protect seat counts and keep notifications consistent with state changes.
+7. Registration and event lifecycle services use PostgreSQL transactions and an event-row lock to protect seat counts and keep notifications consistent with state changes.
 8. After the answer, one `api.access` line is written with the request id, method, path, status, duration and user id. Log lines are JSON, and never hold query strings, bodies, tokens or passwords.
 
 See [README.md](../README.md) for endpoint details, request fields, and examples, and [DECISIONS.md](./DECISIONS.md) for the design rationale and trade-offs.
