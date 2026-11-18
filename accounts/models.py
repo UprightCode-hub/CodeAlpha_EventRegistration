@@ -2,6 +2,7 @@ from typing import ClassVar
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models.functions import Lower
 
 from accounts.managers import UserManager
 
@@ -21,6 +22,13 @@ class User(AbstractUser):
     objects: ClassVar[UserManager] = UserManager()
 
     REQUIRED_FIELDS = ["email"]
+
+    class Meta(AbstractUser.Meta):
+        """Enforces username uniqueness regardless of case."""
+
+        constraints = [
+            models.UniqueConstraint(Lower("username"), name="unique_user_username_lower"),
+        ]
 
     def save(self, *args, **kwargs):
         """Store the account email in lowercase."""

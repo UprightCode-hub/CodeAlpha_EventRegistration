@@ -105,6 +105,15 @@ class RegisterTests(AccountTestBase):
         self.assert_error(response, 400, "validation_error")
         self.assertIn("username", error_of(response)["fields"])
 
+    def test_username_is_normalized_and_case_insensitive_duplicates_are_rejected(self):
+        first = self.register(username=" Alice ")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.json()["username"], "alice")
+
+        second = self.register(username="ALICE", email="other@example.com")
+        self.assert_error(second, 400, "validation_error")
+        self.assertIn("username", error_of(second)["fields"])
+
     def test_duplicate_email_is_rejected_ignoring_case(self):
         self.register()
         response = self.register(username="bob", email="ALICE@Example.com")
@@ -132,6 +141,12 @@ class RegisterTests(AccountTestBase):
     def test_malformed_json_is_a_validation_error(self):
         response = self.client.post(REGISTER_URL, data="{not json", content_type="application/json")
         self.assert_error(response, 400, "validation_error")
+
+    def test_create_integrity_error_is_a_validation_error(self):
+        with patch("accounts.serializers.User.objects.create_user", side_effect=IntegrityError):
+            response = self.register()
+        self.assert_error(response, 400, "validation_error")
+        self.assertIn("non_field_errors", error_of(response)["fields"])
 
 
 class LoginTests(AccountTestBase):
@@ -306,6 +321,12 @@ class UserModelTests(TestCase):
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 User.objects.create_user("two", "same@example.com", PASSWORD)
+
+    def test_username_is_unique_in_the_database_ignoring_case(self):
+        User.objects.create_user("Alice", "alice@example.com", PASSWORD)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                User.objects.create_user("alice", "other@example.com", PASSWORD)
 
 
 class SettingsTests(SimpleTestCase):

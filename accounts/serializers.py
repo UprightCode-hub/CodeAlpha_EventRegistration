@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -16,6 +17,7 @@ class RegisterSerializer(serializers.Serializer):
 
     def validate_username(self, value):
         """Validate a username before continuing."""
+        value = value.strip().lower()
         if User.objects.filter(username__iexact=value).exists():
             raise serializers.ValidationError("A user with that username already exists.")
         return value
@@ -40,7 +42,17 @@ class RegisterSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         """Create an object from validated data."""
-        return User.objects.create_user(**validated_data)
+        try:
+            return User.objects.create_user(**validated_data)
+        except IntegrityError as exc:
+            errors = {}
+            if User.objects.filter(username__iexact=validated_data["username"]).exists():
+                errors["username"] = ["A user with that username already exists."]
+            if User.objects.filter(email__iexact=validated_data["email"]).exists():
+                errors["email"] = ["A user with that email already exists."]
+            if not errors:
+                errors["non_field_errors"] = ["Unable to create the account. Please try again."]
+            raise serializers.ValidationError(errors) from exc
 
 
 class UserSerializer(serializers.ModelSerializer):
