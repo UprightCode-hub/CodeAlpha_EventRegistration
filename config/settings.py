@@ -3,6 +3,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 from config.admin_url import normalize_admin_url
@@ -189,6 +190,8 @@ LOGIN_MAX_FAILURES_PER_IP = 20
 LOGIN_LOCK_WINDOW_SECONDS = 900
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "") == "True"
 METRICS_TOKEN = os.environ.get("METRICS_TOKEN", "")
+if METRICS_ENABLED and not METRICS_TOKEN.strip():
+    raise ImproperlyConfigured("METRICS_TOKEN must be set when METRICS_ENABLED is True.")
 THROTTLING_ENABLED = (
     os.environ.get("THROTTLING_ENABLED", "") == "True"
     if "THROTTLING_ENABLED" in os.environ

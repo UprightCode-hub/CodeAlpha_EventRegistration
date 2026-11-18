@@ -2,7 +2,9 @@
 
 import json
 import logging
+import os
 import re
+import subprocess
 import sys
 from datetime import datetime
 
@@ -241,11 +243,12 @@ class JsonFormatTests(TestCase):
         self.assertEqual(data["shop"], "north")
 
 
-@override_settings(METRICS_ENABLED=True, METRICS_TOKEN="")
+@override_settings(METRICS_ENABLED=True, METRICS_TOKEN="scrape-token-1")
 class MetricsTests(TestCase):
     """Checks the /metrics route and the numbers behind it."""
 
     def scrape(self, **extra):
+        extra.setdefault("HTTP_AUTHORIZATION", "Bearer scrape-token-1")
         return self.client.get("/metrics", **extra)
 
     def test_the_text_format_names_both_metrics(self):
@@ -287,7 +290,10 @@ class MetricsTests(TestCase):
         self.assertNotIn('route="metrics"', text)
 
     def test_other_methods_are_refused(self):
-        self.assertEqual(self.client.post("/metrics").status_code, 405)
+        self.assertEqual(
+            self.client.post("/metrics", HTTP_AUTHORIZATION="Bearer scrape-token-1").status_code,
+            405,
+        )
 
 
 @override_settings(METRICS_ENABLED=False)
@@ -308,7 +314,7 @@ class MetricsDisabledTests(TestCase):
 
 @override_settings(METRICS_ENABLED=True, METRICS_TOKEN="scrape-token-1")
 class MetricsTokenTests(TestCase):
-    """Checks the optional bearer token on /metrics."""
+    """Checks the required bearer token on /metrics."""
 
     def test_no_token_is_a_401(self):
         response = self.client.get("/metrics")
@@ -323,3 +329,19 @@ class MetricsTokenTests(TestCase):
     def test_the_right_token_is_accepted(self):
         response = self.client.get("/metrics", HTTP_AUTHORIZATION="Bearer scrape-token-1")
         self.assertEqual(response.status_code, 200)
+
+
+class MetricsSettingsTests(TestCase):
+    """Checks metrics configuration fails safely during settings startup."""
+
+    def test_enabled_metrics_without_a_token_prevents_startup(self):
+        environment = os.environ | {"METRICS_ENABLED": "True", "METRICS_TOKEN": "   "}
+        result = subprocess.run(
+            [sys.executable, "-c", "import config.settings"],
+            capture_output=True,
+            check=False,
+            env=environment,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("METRICS_TOKEN must be set", result.stderr)

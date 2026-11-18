@@ -16,12 +16,18 @@ class MetricsDisabledCsrfTests(TestCase):
                 self.assertEqual(response.json()["error"]["code"], "not_found")
 
 
-@override_settings(METRICS_ENABLED=True, METRICS_TOKEN="")
+@override_settings(METRICS_ENABLED=True, METRICS_TOKEN="scrape-token-1")
 class MetricsEnabledCsrfTests(TestCase):
     """Checks an enabled metrics route with a client that enforces the CSRF check."""
 
-    def test_post_is_refused_with_the_json_method_error(self):
+    def test_unauthenticated_post_is_refused_with_the_json_authentication_error(self):
         client = Client(enforce_csrf_checks=True)
         response = client.post("/metrics")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "not_authenticated")
+
+    def test_authenticated_post_is_refused_with_the_json_method_error(self):
+        client = Client(enforce_csrf_checks=True)
+        response = client.post("/metrics", HTTP_AUTHORIZATION="Bearer scrape-token-1")
         self.assertEqual(response.status_code, 405)
         self.assertEqual(response.json()["error"]["code"], "method_not_allowed")

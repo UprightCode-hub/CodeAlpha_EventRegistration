@@ -36,7 +36,7 @@ def metrics_view(request):
     if not settings.METRICS_ENABLED:
         return error_response("not_found")
     token = settings.METRICS_TOKEN
-    if token and request.headers.get("Authorization") != f"Bearer {token}":
+    if request.headers.get("Authorization") != f"Bearer {token}":
         return error_response("not_authenticated")
     if request.method != "GET":
         return error_response("method_not_allowed")
