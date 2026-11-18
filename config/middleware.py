@@ -62,12 +62,16 @@ class BodySizeLimitMiddleware:
 
     def __call__(self, request):
         """Check the declared body size before passing the request onward."""
-        # Django does not limit the JSON request bodies parsed by the API.
-        content_length = request.META.get("CONTENT_LENGTH", "")
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return self.get_response(request)
+
+        content_length = request.META.get("CONTENT_LENGTH")
+        if content_length in (None, ""):
+            return error_response("payload_too_large")
         try:
             body_size = int(content_length)
         except (TypeError, ValueError):
-            body_size = 0
-        if body_size > settings.MAX_REQUEST_BODY_BYTES:
+            return error_response("payload_too_large")
+        if body_size < 0 or body_size > settings.MAX_REQUEST_BODY_BYTES:
             return error_response("payload_too_large")
         return self.get_response(request)

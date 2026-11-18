@@ -6,8 +6,10 @@ from unittest import mock
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import InterfaceError, OperationalError
-from django.test import Client, TestCase
+from django.test import Client, RequestFactory, TestCase
 from rest_framework.test import APIClient
+
+from config.middleware import BodySizeLimitMiddleware
 
 User = get_user_model()
 
@@ -158,6 +160,8 @@ class BodySizeTests(ResilienceBase):
 
     def test_the_limit_is_a_setting(self):
         self.assertEqual(settings.MAX_REQUEST_BODY_BYTES, LIMIT)
+        self.assertEqual(settings.DATA_UPLOAD_MAX_MEMORY_SIZE, LIMIT)
+        self.assertEqual(settings.FILE_UPLOAD_MAX_MEMORY_SIZE, LIMIT)
 
     def test_a_body_over_the_limit_is_413(self):
         client = self.signed_in()
@@ -184,6 +188,20 @@ class BodySizeTests(ResilienceBase):
     def test_it_applies_to_login_too(self):
         response = self.post_raw(self.client, self.padded(LIMIT + 1), url="/api/auth/login/")
         self.assertEqual(response.status_code, 413)
+
+    def test_a_request_without_content_length_is_refused(self):
+        request = RequestFactory().generic("POST", EVENTS, "{}", content_type="application/json")
+        del request.META["CONTENT_LENGTH"]
+        response = BodySizeLimitMiddleware(lambda request: None)(request)
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(json.loads(response.content)["error"]["code"], "payload_too_large")
+
+    def test_an_invalid_content_length_is_refused(self):
+        request = RequestFactory().generic("POST", EVENTS, "{}", content_type="application/json")
+        request.META["CONTENT_LENGTH"] = "not-a-number"
+        response = BodySizeLimitMiddleware(lambda request: None)(request)
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(json.loads(response.content)["error"]["code"], "payload_too_large")
 
     def test_normal_requests_are_not_affected(self):
         client = self.signed_in()

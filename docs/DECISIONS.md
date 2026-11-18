@@ -310,7 +310,7 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - The Django admin sign-in has no lockout.
 - The hidden admin path keeps out scans of `/admin/` and is not access control.
 - Expired idempotency records are deleted only when their key is seen again, so a cleanup job would be needed at scale.
-- The body size limit reads the `Content-Length` header, so a request that sends no length is not caught.
+- Django limits in-memory uploads to `MAX_REQUEST_BODY_BYTES`, and body-bearing requests without a valid `Content-Length` are refused. A production reverse proxy must also enforce an equivalent body limit, such as Nginx `client_max_body_size`.
 - No CORS headers, so a browser frontend on another address would be blocked.
 - Notifications are in the app only. Nothing is sent by email.
 - Anyone can register as an organizer.
