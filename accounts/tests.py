@@ -65,10 +65,11 @@ class RegisterTests(AccountTestBase):
         self.assertEqual(body["username"], "alice")
         self.assertEqual(body["role"], "attendee")
 
-    def test_register_organizer(self):
+    def test_register_ignores_a_submitted_organizer_role(self):
         response = self.register(username="olu", email="olu@example.com", role="organizer")
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["role"], "organizer")
+        self.assertEqual(response.json()["role"], "attendee")
+        self.assertEqual(User.objects.get(username="olu").role, "attendee")
 
     def test_password_is_hashed_and_never_returned(self):
         response = self.register()
@@ -77,25 +78,25 @@ class RegisterTests(AccountTestBase):
         self.assertNotEqual(user.password, PASSWORD)
         self.assertTrue(user.check_password(PASSWORD))
 
-    def test_missing_role_is_rejected(self):
+    def test_role_is_not_required_for_public_registration(self):
         response = self.client.post(
             REGISTER_URL,
             {"username": "alice", "email": "alice@example.com", "password": PASSWORD},
             format="json",
         )
-        self.assert_error(response, 400, "validation_error")
-        self.assertIn("role", error_of(response)["fields"])
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["role"], "attendee")
 
-    def test_unknown_role_is_rejected(self):
+    def test_unknown_role_is_ignored(self):
         response = self.register(role="admin")
-        self.assert_error(response, 400, "validation_error")
-        self.assertIn("role", error_of(response)["fields"])
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["role"], "attendee")
 
     def test_every_missing_field_is_reported(self):
         response = self.client.post(REGISTER_URL, {}, format="json")
         self.assert_error(response, 400, "validation_error")
         fields = error_of(response)["fields"]
-        for name in ("username", "email", "password", "role"):
+        for name in ("username", "email", "password"):
             self.assertIn(name, fields)
 
     def test_duplicate_username_is_rejected(self):

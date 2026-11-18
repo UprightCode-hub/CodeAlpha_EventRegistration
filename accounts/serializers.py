@@ -12,7 +12,7 @@ class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, trim_whitespace=False, max_length=128)
-    role = serializers.ChoiceField(choices=User.Role.choices)
+    role = serializers.ChoiceField(choices=User.Role.choices, read_only=True)
 
     def validate_username(self, value):
         """Validate a username before continuing."""
