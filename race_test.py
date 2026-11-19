@@ -10,6 +10,9 @@ Phase 2: the three registered attendees cancel at the same moment.
 """
 
 import json
+import os
+from pathlib import Path
+import subprocess
 import sys
 import threading
 import time
@@ -20,11 +23,24 @@ from datetime import datetime, timedelta, timezone
 BASE = "http://127.0.0.1:8000"
 PASSWORD = "Smoke-Test-Pass-91!"
 PHONE = "+2348012345678"
+EVENTREG_PROJECT_DIR = Path(
+    os.environ.get("EVENTREG_PROJECT_DIR", Path(__file__).resolve().parent)
+)
 PRE_FILLED = 2
 RACERS = 10
 CAPACITY = PRE_FILLED + 1
 
 results = []
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep redirects visible so startup configuration errors are actionable."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+OPENER = urllib.request.build_opener(NoRedirect)
 
 
 def check(name, ok, detail=""):
@@ -42,7 +58,7 @@ def call(method, path, body=None, token=None):
     if token:
         request.add_header("Authorization", "Bearer " + token)
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with OPENER.open(request, timeout=60) as response:
             status, raw = response.status, response.read()
     except urllib.error.HTTPError as error:
         status, raw = error.code, error.read()
@@ -67,18 +83,39 @@ def get_all(path, token=None):
         page += 1
 
 
-def make_user(username, role):
-    """Registers a user through the API, signs in and returns the token."""
-    status, _ = call(
+def promote_organizer(username):
+    """Promote one race-test user through Django after public registration."""
+    command = (
+        "from accounts.models import User; "
+        f"updated = User.objects.filter(username={username!r}).update(role='organizer'); "
+        "assert updated == 1, updated"
+    )
+    result = subprocess.run(
+        [sys.executable, "manage.py", "shell", "-c", command],
+        cwd=EVENTREG_PROJECT_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"could not promote {username}: {detail}")
+
+
+def make_user(username, organizer=False):
+    """Register as attendee, optionally promote through Django, then sign in."""
+    status, registered = call(
         "POST",
         "/api/auth/register/",
-        {"username": username, "email": f"{username}@example.com", "password": PASSWORD, "role": role},
+        {"username": username, "email": f"{username}@example.com", "password": PASSWORD},
     )
-    if status != 201:
-        raise RuntimeError(f"register {username} answered {status}")
+    if status != 201 or not isinstance(registered, dict) or registered.get("role") != "attendee":
+        raise RuntimeError(f"register {username} answered {status}: {registered}")
+    if organizer:
+        promote_organizer(username)
     status, payload = call("POST", "/api/auth/login/", {"username": username, "password": PASSWORD})
     if status != 200:
-        raise RuntimeError(f"login {username} answered {status}")
+        raise RuntimeError(f"login {username} answered {status}: {payload}")
     return {"name": username, "token": payload["access"]}
 
 
@@ -120,11 +157,25 @@ def notifications_of(person):
 def main():
     stamp = str(int(time.time()))
     try:
-        organizer = make_user(f"smoke_org_{stamp}", "organizer")
+        startup_status, startup_payload = call("GET", "/api/health/")
     except urllib.error.URLError:
         print("The server does not answer at " + BASE + ". Start it with: python manage.py runserver")
         return 2
-    people = [make_user(f"smoke_att_{stamp}_{i}", "attendee") for i in range(PRE_FILLED + RACERS)]
+    if startup_status == 301:
+        print("STARTUP FAILED: the server returned 301. Check DEBUG=True and any SSL redirect settings.")
+        return 2
+    if startup_status == 429:
+        print("STARTUP FAILED: the server returned 429. Set THROTTLING_ENABLED=False before running the race test.")
+        return 2
+    if startup_status != 200:
+        print(f"STARTUP FAILED: health check answered {startup_status}: {startup_payload}")
+        return 2
+    try:
+        organizer = make_user(f"smoke_org_{stamp}", organizer=True)
+    except RuntimeError as error:
+        print("SETUP FAILED: " + str(error))
+        return 2
+    people = [make_user(f"smoke_att_{stamp}_{i}") for i in range(PRE_FILLED + RACERS)]
     start = datetime.now(timezone.utc) + timedelta(days=7)
     status, event = call(
         "POST",

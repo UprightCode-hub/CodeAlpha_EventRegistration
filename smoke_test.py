@@ -1,7 +1,8 @@
 """Smoke test over real HTTP. Needs the server running. Standard library only.
 
 Usage: python smoke_test.py [base_url] [--throttle-only]
-Creates throwaway data whose names start with smoke_. Run it with DEBUG=True.
+Creates throwaway data whose names start with smoke_. Run it with DEBUG=True and
+THROTTLING_ENABLED=False.
 
 A normal run needs a server with throttling off (THROTTLING_ENABLED=False), because the
 run sends hundreds of requests from one address. It also checks the request id header
@@ -16,6 +17,9 @@ health URL. A run records 9 failed sign-ins from this address, and the address l
 """
 import http.client
 import json
+import os
+from pathlib import Path
+import subprocess
 import sys
 import threading
 import time
@@ -31,6 +35,9 @@ STAMP = str(int(time.time()))
 PASSWORD = "Zq7!rvTn#4Lw9dKp"
 PHONE = "+2348012345678"
 ADMIN_PATH = "eventreg-manage/"  # must match ADMIN_URL in .env
+EVENTREG_PROJECT_DIR = Path(
+    os.environ.get("EVENTREG_PROJECT_DIR", Path(__file__).resolve().parent)
+)
 
 EVENT_KEYS = {
     "id", "title", "description", "category", "event_type", "venue_name", "address",
@@ -186,16 +193,41 @@ def event_body(**over):
     return body
 
 
-def make_user(label, role):
-    """Register and log in a throwaway user."""
+def promote_organizer(username):
+    """Promote one smoke user through Django, after public registration."""
+    command = (
+        "from accounts.models import User; "
+        f"updated = User.objects.filter(username={username!r}).update(role='organizer'); "
+        "assert updated == 1, updated"
+    )
+    result = subprocess.run(
+        [sys.executable, "manage.py", "shell", "-c", command],
+        cwd=EVENTREG_PROJECT_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        print(f"SETUP FAILED: could not promote {username}: {detail}")
+        sys.exit(2)
+
+
+def make_user(label, organizer=False):
+    """Register as an attendee, optionally promote through Django, then log in."""
     username = f"smoke_{label}_{STAMP}"
     r = call("POST", "/api/auth/register/", {
         "username": username, "email": f"{username}@example.com",
-        "password": PASSWORD, "role": role})
-    check(f"register {label} as {role} answers 201", r.s == 201, r)
-    need(r.s == 201, f"cannot register {label}")
+        "password": PASSWORD})
+    registered_as_attendee = r.s == 201 and isinstance(r.b, dict) and r.b.get("role") == "attendee"
+    check(f"register {label} answers 201 as attendee", registered_as_attendee, r)
+    need(registered_as_attendee, f"cannot register {label} as an attendee")
+    if organizer:
+        promote_organizer(username)
     login = call("POST", "/api/auth/login/", {"username": username, "password": PASSWORD})
-    need(login.s == 200, f"cannot log in {label}")
+    if login.s != 200:
+        print(f"SETUP FAILED: cannot log in {label}: {login.short()}")
+        sys.exit(2)
     return {"name": username, "id": r.b["id"], "token": login.b["access"], "refresh": login.b["refresh"]}
 
 
@@ -248,7 +280,7 @@ def finish():
 def throttle_section():
     """Check the rate limits. The server must have throttling on."""
     print("... checking rate limits (the server must have throttling on)")
-    user = make_user("thr", "attendee")
+    user = make_user("thr")
     path = "/api/events/"
     limited = None
     last = None
@@ -277,18 +309,26 @@ def throttle_section():
 
 
 print(f"Smoke test against {BASE}, stamp {STAMP}")
+startup = call("GET", "/api/health/")
+if startup.s == 301:
+    print("STARTUP FAILED: the server returned 301. Check DEBUG=True and any SSL redirect settings.")
+    sys.exit(2)
+if startup.s == 429:
+    print("STARTUP FAILED: the server returned 429. Set THROTTLING_ENABLED=False before running the smoke test.")
+    sys.exit(2)
+need(startup.s == 200, "health check did not answer 200: " + startup.short())
 if THROTTLE_ONLY:
     throttle_section()
     finish()
 
 # ---------------------------------------------------------------- setup
-org1 = make_user("org1", "organizer")
-org2 = make_user("org2", "organizer")
-org3 = make_user("org3", "organizer")
-att1 = make_user("att1", "attendee")
-att2 = make_user("att2", "attendee")
-att3 = make_user("att3", "attendee")
-att4 = make_user("att4", "attendee")
+org1 = make_user("org1", organizer=True)
+org2 = make_user("org2", organizer=True)
+org3 = make_user("org3", organizer=True)
+att1 = make_user("att1")
+att2 = make_user("att2")
+att3 = make_user("att3")
+att4 = make_user("att4")
 
 # ---------------------------------------------------------------- auth
 r = call("POST", "/api/auth/register/", {
@@ -300,14 +340,20 @@ r = call("POST", "/api/auth/register/", {
     "password": PASSWORD, "role": "attendee", "is_staff": True, "is_superuser": True, "id": 1})
 check("register ignores is_staff, is_superuser and id", r.s == 201 and set(r.b) == {"id", "username", "email", "role"}, r)
 check("register answer has no password", r.s == 201 and "password" not in r.b, r)
-r = call("POST", "/api/auth/register/", {
-    "username": f"smoke_z_{STAMP}", "email": f"smoke_z_{STAMP}@example.com",
-    "password": PASSWORD})
-expect("register without a role", r, 400, "validation_error", "role")
-r = call("POST", "/api/auth/register/", {
-    "username": f"smoke_z_{STAMP}", "email": f"smoke_z_{STAMP}@example.com",
-    "password": PASSWORD, "role": "admin"})
-expect("register with role admin", r, 400, "validation_error", "role")
+for suffix, submitted_role in (("organizer", "organizer"), ("admin", "admin"), ("no_role", None)):
+    body = {
+        "username": f"smoke_role_{suffix}_{STAMP}",
+        "email": f"smoke_role_{suffix}_{STAMP}@example.com",
+        "password": PASSWORD,
+    }
+    if submitted_role is not None:
+        body["role"] = submitted_role
+    r = call("POST", "/api/auth/register/", body)
+    check(
+        f"register with {submitted_role or 'no'} role answers 201 as attendee",
+        r.s == 201 and isinstance(r.b, dict) and r.b.get("role") == "attendee",
+        r,
+    )
 r = call("POST", "/api/auth/register/", {
     "username": f"smoke_w_{STAMP}", "email": f"smoke_w_{STAMP}@example.com",
     "password": "123", "role": "attendee"})
@@ -421,7 +467,7 @@ expect("edit as an attendee", call("PATCH", f"/api/events/{eid}/", {"title": "x"
 expect("edit without a token", call("PATCH", f"/api/events/{eid}/", {"title": "x" * 5}), 401, "not_authenticated")
 expect("edit an unknown event", call("PATCH", "/api/events/999999999/", {"title": "x" * 5}, token=org1["token"]), 404, "not_found")
 expect("PUT on an event", call("PUT", f"/api/events/{eid}/", event_body(), token=org1["token"]), 405, "method_not_allowed")
-expect("DELETE on an event", call("DELETE", f"/api/events/{eid}/", token=org1["token"]), 405, "method_not_allowed")
+expect("a bodyless DELETE on an event", call("DELETE", f"/api/events/{eid}/", token=org1["token"]), 405, "method_not_allowed")
 
 # ---------------------------------------------------------------- huge and odd ids
 huge = "99999999999999999999"
@@ -706,6 +752,38 @@ def big_body(method, path, length):
     return Reply(status, parsed, hdrs)
 
 
+def chunked_body(method, path):
+    """Send a chunked JSON request without a Content-Length header."""
+    global calls
+    parts = urllib.parse.urlsplit(BASE)
+    klass = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+    conn = klass(parts.hostname, parts.port, timeout=60)
+    try:
+        conn.request(
+            method,
+            path,
+            body=b"{}",
+            headers={"Content-Type": "application/json", "Transfer-Encoding": "chunked"},
+            encode_chunked=True,
+        )
+        resp = conn.getresponse()
+        text = resp.read().decode("utf-8")
+        status, hdrs = resp.status, resp.headers
+    except OSError as exc:
+        print(f"Cannot reach {BASE}: {exc}. Is runserver running?")
+        sys.exit(2)
+    finally:
+        conn.close()
+    calls += 1
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = text
+    if status >= 500:
+        server_errors.append(f"{method} {path} -> {status}")
+    return Reply(status, parsed, hdrs)
+
+
 print("... checking retry keys, lockout, body size and health")
 
 # health
@@ -718,7 +796,7 @@ expect("POST on health", call("POST", "/api/health/", {}), 405, "method_not_allo
 schema = call("GET", "/api/schema/", params={"format": "json"})
 paths = schema.b.get("paths", {}) if isinstance(schema.b, dict) else {}
 operations = sum(1 for item in paths.values() for verb in item if verb in ("get", "post", "put", "patch", "delete"))
-check("the schema has 16 operations", operations == 16, schema)
+check("the schema has 18 operations", operations == 18, schema)
 check("health is not in the schema", "/api/health/" not in paths)
 check("metrics is not in the schema", "/metrics" not in paths)
 for route in ("/api/events/", "/api/registrations/"):
@@ -727,9 +805,9 @@ for route in ("/api/events/", "/api/registrations/"):
     check(f"POST {route} documents the Idempotency-Key header and a 422", has_header and "422" in post.get("responses", {}))
 
 # retry keys on event create
-iorg = make_user("idemorg", "organizer")
-iatt = make_user("idematt", "attendee")
-iatt2 = make_user("idematt2", "attendee")
+iorg = make_user("idemorg", organizer=True)
+iatt = make_user("idematt")
+iatt2 = make_user("idematt2")
 ititle = f"smoke {STAMP} idem event"
 ibody = event_body(title=ititle, capacity=3)
 key1 = f"smoke-{STAMP}-ev1"
@@ -800,7 +878,7 @@ r = call("POST", "/api/auth/register/", {"username": f"smoke_cap2_{STAMP}", "ema
 expect("a password of 129 characters", r, 400, "validation_error", "password")
 
 # sign-in lockout
-lock = make_user("lock", "attendee")
+lock = make_user("lock")
 wrong = {"username": lock["name"], "password": "Wrong-Pass-1x"}
 five = [call("POST", "/api/auth/login/", wrong) for _ in range(5)]
 check("five wrong passwords each answer 401", all(x.s == 401 and err(x).get("code") == "not_authenticated" for x in five), five[-1])
@@ -827,6 +905,8 @@ r = big_body("POST", "/api/events/", 1048577)
 expect("a body over 1048576 bytes is refused before authentication", r, 413, "payload_too_large")
 check("the 413 answer is JSON", is_json(r), r)
 check("the 413 answer carries a request id", is_hex32(r.h.get("X-Request-ID")), r)
+r = chunked_body("POST", "/api/events/")
+expect("Transfer-Encoding chunked is refused", r, 413, "payload_too_large")
 padded = "{bad" + " " * (1048576 - 4)
 r = call("POST", "/api/auth/register/", raw=padded)
 expect("a body of exactly 1048576 bytes is accepted", r, 400, "validation_error")
