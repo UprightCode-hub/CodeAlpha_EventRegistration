@@ -6,6 +6,8 @@ from django.conf import settings
 from django.core.cache import cache
 from rest_framework.throttling import BaseThrottle
 
+from config.net import client_ip
+
 
 class ScopedRateThrottle(BaseThrottle):
     """Throttle requests using the scope configured on each API view."""
@@ -58,7 +60,7 @@ class ScopedRateThrottle(BaseThrottle):
         if request.user.is_authenticated:
             identity = f"user:{request.user.pk}"
         else:
-            identity = f"anon:{request.META.get('REMOTE_ADDR', '')}"
+            identity = f"anon:{client_ip(request)}"
         return f"throttle:{self.scope}:{identity}"
 
     def wait(self):

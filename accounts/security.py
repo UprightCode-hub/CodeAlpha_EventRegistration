@@ -2,6 +2,7 @@
 
 import logging
 import math
+import unicodedata
 from datetime import timedelta
 
 from django.conf import settings
@@ -13,8 +14,8 @@ logger = logging.getLogger("accounts.security")
 
 
 def normalize_username(username):
-    """Strip and lowercase a username and keep its first 150 characters."""
-    return username.strip().lower()[:150]
+    """Normalize a username as Django's login form does before storing a lookup key."""
+    return unicodedata.normalize("NFKC", username).strip().lower()[:150]
 
 
 def blocking_seconds(username, address):

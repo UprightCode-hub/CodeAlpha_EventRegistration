@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.contrib.admin import ActionLocation
+from django.http import HttpRequest
 
 from registrations.models import IdempotencyRecord, Notification, Registration
 
@@ -6,6 +8,8 @@ from registrations.models import IdempotencyRecord, Notification, Registration
 @admin.register(Registration)
 class RegistrationAdmin(admin.ModelAdmin):
     """Provides registration management with attendee and event details."""
+
+    readonly_fields = ("attendee", "event", "status", "created_at", "updated_at")
 
     list_display = ("id", "full_name", "attendee", "event", "status", "created_at")
     list_filter = ("status",)
@@ -17,6 +21,24 @@ class RegistrationAdmin(admin.ModelAdmin):
         "event__title",
     )
     list_select_related = ("attendee", "event")
+
+    def has_add_permission(self, request):
+        """Keep registration creation in the transactional seat service."""
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Preserve registration history and prevent bulk seat bypasses."""
+        return False
+
+    def get_actions(
+        self,
+        request: HttpRequest,
+        action_location: ActionLocation = ActionLocation.CHANGE_LIST,
+    ):
+        """Remove Django's bulk delete action for registrations."""
+        actions = super().get_actions(request, action_location)
+        actions.pop("delete_selected", None)
+        return actions
 
 
 @admin.register(Notification)

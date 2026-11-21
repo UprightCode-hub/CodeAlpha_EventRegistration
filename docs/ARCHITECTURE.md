@@ -190,6 +190,15 @@ flowchart TD
 
 Event edits that change a time, venue, format, or location notify registered and waitlisted attendees. Raising capacity uses the same event lock and promotion logic. Promotion may continue after the registration deadline, but not after the event starts.
 
+## Production Scaling Roadmap
+
+The current synchronous modular monolith is appropriate for a small deployment, but these changes should be made before scaling across workers or serving large events:
+
+1. Replace the process-local `LocMemCache` rate-limit store with Redis so throttling is shared consistently across workers and instances.
+2. Move bulk event-cancellation notifications and waitlist promotions to a background worker such as Celery or RQ. Keep the state transition transactional, then enqueue durable jobs for large-capacity events.
+3. Replace `icontains` event search with PostgreSQL `pg_trgm` GIN indexes or full-text search vectors when catalog size and query volume justify it.
+4. Restrict `/metrics` at the reverse proxy to an internal VPC or subnet CIDR in addition to the bearer token, reducing exposure if the token is leaked.
+
 ## Request-wide behavior
 
 1. The request-id middleware runs first. It keeps a valid `X-Request-ID` from the client or makes a new one, binds it to every log line of the request, and adds it to the answer, including errors and the 413.

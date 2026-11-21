@@ -53,6 +53,17 @@ class Registration(models.Model):
                 condition=Q(status__in=("registered", "waitlisted")),
                 name="unique_open_registration_per_attendee_event",
             ),
+            models.CheckConstraint(
+                condition=Q(
+                    status__in=(
+                        "registered",
+                        "waitlisted",
+                        "cancelled",
+                        "event_cancelled",
+                    )
+                ),
+                name="registration_status_is_valid",
+            ),
         )
 
 

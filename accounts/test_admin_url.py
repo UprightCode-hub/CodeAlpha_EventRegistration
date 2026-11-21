@@ -2,9 +2,9 @@
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.test import Client, SimpleTestCase, TestCase
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 
-from accounts.models import User
+from accounts.models import LoginFailure, User
 from config.admin_url import normalize_admin_url
 
 PASSWORD = "Zq7!rvTn#4Lw9dKp"
@@ -144,3 +144,44 @@ class AdminAtTheConfiguredPathTests(TestCase):
         client = Client(enforce_csrf_checks=True)
         response = client.post(admin_root() + "login/", {"username": "a", "password": "b"})
         self.assertEqual(response.status_code, 403)
+
+
+class AdminLoginSecurityTests(TestCase):
+    """Checks lockout and failure accounting on the Django admin login form."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="protected_admin", email="protected@example.com", password=PASSWORD
+        )
+        self.login_url = admin_root() + "login/"
+
+    @override_settings(LOGIN_MAX_FAILURES_PER_USER=2, LOGIN_MAX_FAILURES_PER_IP=20)
+    def test_repeated_failed_admin_logins_are_locked(self):
+        client = Client()
+        with self.assertLogs("accounts.security", level="WARNING") as logs:
+            for _ in range(2):
+                response = client.post(
+                    self.login_url, {"username": self.user.username, "password": "wrong"}
+                )
+                self.assertEqual(response.status_code, 200)
+            response = client.post(
+                self.login_url, {"username": self.user.username, "password": "wrong"}
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response["Retry-After"], "900")
+        self.assertEqual(LoginFailure.objects.filter(username=self.user.username).count(), 2)
+        self.assertTrue(any("login blocked" in message for message in logs.output))
+
+    @override_settings(LOGIN_MAX_FAILURES_PER_USER=2, LOGIN_MAX_FAILURES_PER_IP=20)
+    def test_successful_admin_login_clears_failures(self):
+        client = Client()
+        failed = client.post(self.login_url, {"username": self.user.username, "password": "wrong"})
+        self.assertEqual(failed.status_code, 200)
+        self.assertEqual(LoginFailure.objects.count(), 1)
+
+        successful = client.post(
+            self.login_url, {"username": self.user.username, "password": PASSWORD}
+        )
+        self.assertEqual(successful.status_code, 302)
+        self.assertEqual(LoginFailure.objects.count(), 0)

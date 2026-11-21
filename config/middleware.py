@@ -77,3 +77,42 @@ class BodySizeLimitMiddleware:
         if body_size < 0 or body_size > settings.MAX_REQUEST_BODY_BYTES:
             return error_response("payload_too_large")
         return self.get_response(request)
+
+
+class AdminLoginSecurityMiddleware:
+    """Apply the API sign-in lockout to the Django admin login form."""
+
+    def __init__(self, get_response):
+        """Save the next middleware or view in the request chain."""
+        self.get_response = get_response
+
+    def __call__(self, request):
+        """Block locked admin logins and record failed form submissions."""
+        if not self._is_admin_login(request):
+            return self.get_response(request)
+
+        from accounts.security import blocking_seconds, clear_failures, log_blocked, record_failure
+        from config.net import client_ip
+
+        username = request.POST.get("username", "").strip()
+        address = client_ip(request)
+        if username:
+            retry_after = blocking_seconds(username, address)
+            if retry_after is not None:
+                log_blocked(username, address)
+                return error_response(
+                    "too_many_attempts", headers={"Retry-After": str(retry_after)}
+                )
+
+        response = self.get_response(request)
+        if username:
+            if response.status_code == 302:
+                clear_failures(username, address)
+            elif response.status_code == 200:
+                record_failure(username, address)
+        return response
+
+    @staticmethod
+    def _is_admin_login(request):
+        """Return whether the request is a POST to the configured admin login."""
+        return request.method == "POST" and request.path == f"/{settings.ADMIN_URL}login/"

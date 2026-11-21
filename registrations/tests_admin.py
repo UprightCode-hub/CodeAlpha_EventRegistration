@@ -116,9 +116,10 @@ class AdminPageTests(AdminTestBase):
                 self.assertEqual(self.client.get(url).status_code, 200)
 
     def test_add_pages_open_for_users_events_and_registrations(self):
-        for url in (f"{USER_LIST}add/", f"{EVENT_LIST}add/", f"{REGISTRATION_LIST}add/"):
+        for url in (f"{USER_LIST}add/", f"{EVENT_LIST}add/"):
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(self.client.get(f"{REGISTRATION_LIST}add/").status_code, 403)
 
     def test_the_list_pages_show_the_rows(self):
         self.assertContains(self.client.get(EVENT_LIST), "Admin Meetup")
@@ -156,6 +157,42 @@ class AdminPageTests(AdminTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(Event.objects.filter(pk=self.event.pk).exists())
         self.assertTrue(Registration.objects.filter(pk=self.registration.pk).exists())
+
+    def test_registration_status_cannot_be_changed_in_admin(self):
+        event = self.make_event(title="Admin Capacity", capacity=1)
+        registered_person = self.make_attendee("att_registered")
+        waiting_person = self.make_attendee("att_waiting")
+        registered = self.make_registration(registered_person, event, "registered")
+        waiting = self.make_registration(waiting_person, event, "waitlisted")
+        url = f"{REGISTRATION_LIST}{registered.pk}/change/"
+
+        response = self.client.post(
+            url,
+            {
+                "full_name": registered.full_name,
+                "phone": registered.phone,
+                "note": registered.note,
+                "status": "cancelled",
+                "_save": "Save",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        registered.refresh_from_db()
+        waiting.refresh_from_db()
+        self.assertEqual(registered.status, Registration.Status.REGISTERED)
+        self.assertEqual(waiting.status, Registration.Status.WAITLISTED)
+
+    def test_registration_delete_is_disabled_in_admin(self):
+        person = self.make_attendee("att_delete")
+        registration = self.make_registration(person, self.event, "registered")
+        url = f"{REGISTRATION_LIST}{registration.pk}/delete/"
+
+        self.assertEqual(self.client.get(url).status_code, 403)
+        response = self.client.post(url, {"post": "yes"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Registration.objects.filter(pk=registration.pk).exists())
 
     def test_anonymous_and_non_staff_users_are_sent_to_the_login_page(self):
         self.client.logout()

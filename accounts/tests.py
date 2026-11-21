@@ -259,9 +259,7 @@ class TokenRevocationTests(AccountTestBase):
         login = self.client.post(
             LOGIN_URL, {"username": "alice", "password": new_password}, format="json"
         )
-        self.assertEqual(
-            login.status_code, 200
-        )
+        self.assertEqual(login.status_code, 200)
 
 
 class MeTests(AccountTestBase):

@@ -49,6 +49,11 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Why:** Every server process reads the same database, so the count does not depend on which process answered. It needs no extra service, and rows written in a test roll back with the test. Rows older than the window are deleted when a new failure is recorded.
 - **What breaks if changed:** The project would need a cache service, and counts could differ between processes.
 
+- **Decision:** Normalize usernames with Unicode NFKC, trimming and lowercasing before looking up, recording or clearing a failed sign-in.
+- **Alternative rejected:** Normalize only case, or keep a separate normalization rule for the Django admin form.
+- **Why:** The API lockout and Django's admin login form must treat visually equivalent usernames as one account and one failure counter.
+- **What breaks if changed:** Unicode compatibility variants could divide failures across counters and allow extra password guesses.
+
 - **Decision:** Failed and blocked sign-ins are written to the log at warning level, with the username shown through `%r` and the address. The password is never logged. A password over 128 characters is refused at register and counted as a failure at login, and a username over 150 characters is counted as a failure at login.
 - **Alternative rejected:** Log nothing, or log the raw username.
 - **Why:** The log shows an attack as it happens. `%r` keeps control characters in a username from forging a log line. Without a length cap, a very long password makes the hasher do far more work than a normal one.
@@ -123,6 +128,11 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Why:** The database is the last guard if the code check is skipped or beaten. A cancelled row must not block the same person from registering again, and keeping the old row preserves the history.
 - **What breaks if changed:** Duplicates could be stored, or a person who cancelled could never come back.
 
+- **Decision:** Registrations cannot be added through Django admin; only the transactional seat service creates them.
+- **Alternative rejected:** Let staff add registrations directly in the admin.
+- **Why:** A direct admin insert can bypass the event lock, capacity calculation, waitlist ordering and notification creation.
+- **What breaks if changed:** Staff could overfill an event or create registrations that do not match the seat and notification state.
+
 - **Decision:** Cancelling a registration changes its status and keeps the row. A new registration after cancelling is a new row.
 - **Alternative rejected:** Delete the row on cancel.
 - **Why:** A record that someone registered and cancelled is useful to the organizer and cannot be reconstructed after a delete.
@@ -147,6 +157,11 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Alternative rejected:** Validate first and take the lock only to save, or report field errors before state errors.
 - **Why:** If the state were read before the lock, a registration or a cancel could land in between and the edit would compare against stale values. Telling a client that the event is already over is more useful than listing typos in a request that could never succeed. Field validation runs before `capacity_too_low` so that a capacity of 0 is reported as invalid and not as too low.
 - **What breaks if changed:** An edit could promote or reject people on out-of-date counts, and a request to a dead event could get a misleading answer.
+
+- **Decision:** The database enforces the event capacity range from 1 through 100000 with check constraints.
+- **Alternative rejected:** Enforce the range only with model and serializer validators.
+- **Why:** Direct ORM writes and bulk updates bypass validators, while database constraints protect every write path.
+- **What breaks if changed:** An invalid capacity could be persisted and corrupt seat calculations.
 
 - **Decision:** Lists compute the seat counts in the same query as the events, and the registration and notification lists compute the waitlist position in the query. A page of 10 costs the same number of queries as a page of 2.
 - **Alternative rejected:** Count per row in the serializer.
@@ -241,6 +256,17 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - **Why:** `seats_left` changes on every registration and cancellation, and it is the field a client most wants to be right. A cache would need to be cleared after every committed change, and a missed clear would show an event as having a seat when it does not. List pages are paged, filtered and indexed, and the query count does not grow with the page, so the saving is small for the risk. If traffic grew, I would cache only the parts that change slowly, after measuring.
 - **What breaks if changed:** Seat counts could be stale for as long as the cache lives.
 
+## Production Scaling Roadmap
+
+- **Decision:** Keep the current synchronous implementation for the internship-sized deployment, while recording explicit scale-out steps.
+- **Alternative rejected:** Add a queue, Redis, and specialized search infrastructure before measuring the current workload.
+- **Why:** The existing database transactions preserve seat and waitlist correctness, and premature infrastructure would increase operational complexity. At higher scale, the following changes become justified:
+  - Move `LocMemCache` throttling to Redis so limits are shared by all workers.
+  - Offload bulk event-cancellation notifications and waitlist promotions to Celery or RQ workers, while keeping the state transition transactional and jobs durable.
+  - Add PostgreSQL `pg_trgm` GIN indexes or full-text search vectors instead of relying on `icontains` for a large event catalog.
+  - Restrict `/metrics` at the reverse proxy to an internal VPC/subnet CIDR as an additional control alongside bearer authentication.
+- **What breaks if changed:** Scaling without these changes can produce per-worker throttle inconsistencies, long cancellation requests, slow catalog searches, or an unnecessarily exposed metrics endpoint.
+
 ## Code quality tooling
 
 - **Decision:** Style and lint are checked with Ruff (line length 100, import order, bugbear and pyupgrade rules). Types are checked with mypy and the Django and DRF stubs. One `pyproject.toml` holds the settings for both. The two live scripts, `smoke_test.py` and `race_test.py`, are left out of both checks.
@@ -272,7 +298,7 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 
 - **Decision:** The Django admin is served at a path read from `ADMIN_URL` in `.env`, with the default `eventreg-manage/`, and not at `/admin/`. A value that is empty, has more than one segment, has a character other than a letter, digit, hyphen or underscore, or is `admin` in any letter case stops the project from starting. `/admin/` and everything under it answer the JSON `not_found`, like any unknown URL.
 - **Alternative rejected:** Keep the admin at `/admin/`, or remove it.
-- **Why:** Scans try `/admin/` first, so a different path keeps the admin out of those scans. It is an extra layer and not the protection. Anyone who learns the path sees the same sign in page, and the default value is public in the repository, so a real deployment sets its own. The protection is a strong superuser password, no weak staff accounts, HTTPS and a sign in lockout, which the admin sign in does not have yet. A bad value stops the project at startup, because serving the admin at a path nobody meant is worse than not starting.
+- **Why:** Scans try `/admin/` first, so a different path keeps the admin out of those scans. It is an extra layer and not the protection. Anyone who learns the path sees the same sign in page, and the default value is public in the repository, so a real deployment sets its own. The protection is a strong superuser password, no weak staff accounts, HTTPS and the sign-in lockout shared with the API. A bad value stops the project at startup, because serving the admin at a path nobody meant is worse than not starting.
 - **What breaks if changed:** The admin would sit at the most scanned path, or a typo in `.env` would start the project with the admin somewhere unexpected.
 
 - **Decision:** The API schema and the Swagger page at `/api/schema/` and `/api/docs/` are public. Every operation is described with `@extend_schema`, because the views are plain `APIView`s and the schema cannot find their shapes by itself.
@@ -306,14 +332,14 @@ Each entry gives the decision, the alternative I rejected, why, and what breaks 
 - The metrics route has a token but no network restriction, so a real deployment should keep it on a private network.
 - Behind a proxy every anonymous client shares one connecting address, so the anonymous rate limits would apply to all of them together.
 - The sign-in lockout counts by the connecting address, so behind a proxy every client would share one address.
-- The Django admin sign-in has no lockout.
 - The hidden admin path keeps out scans of `/admin/` and is not access control.
 - Expired idempotency records are deleted only when their key is seen again, so a cleanup job would be needed at scale.
 - Django limits in-memory uploads to `MAX_REQUEST_BODY_BYTES`; requests with an invalid or oversized `Content-Length`, or any `Transfer-Encoding` header, are refused. A production reverse proxy must also enforce an equivalent body limit, such as Nginx `client_max_body_size`.
 - No CORS headers, so a browser frontend on another address would be blocked.
 - Notifications are in the app only. Nothing is sent by email.
 - A promoted waitlist attendee has no confirmation window.
-- Changes made in the admin bypass the seat rules.
+- The sign-in lockout check and the failure record are not atomic, so parallel guesses can slightly exceed the limit; the real bound is hasher cost and the per-address cap.
+- Admin edits to event times, format or place send no notification and can move an event with open registrations into the past. This extends the existing gap that admin changes bypass the seat rules.
 - The Swagger page needs an internet connection.
 - Runs on the Django development server and is not set up for production.
 

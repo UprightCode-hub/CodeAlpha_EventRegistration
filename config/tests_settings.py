@@ -26,6 +26,8 @@ names = (
     'SECURE_HSTS_PRELOAD',
     'SECURE_PROXY_SSL_HEADER',
     'CSRF_TRUSTED_ORIGINS',
+    'USE_X_FORWARDED_FOR',
+    'TRUSTED_PROXY_COUNT',
 )
 print(json.dumps({name: getattr(settings, name, None) for name in names}))
 """
@@ -38,6 +40,11 @@ print(json.dumps({name: getattr(settings, name, None) for name in names}))
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
+
+    def test_forwarded_for_is_disabled_by_default(self):
+        values = self.settings_from_environment()
+        self.assertFalse(values["USE_X_FORWARDED_FOR"])
+        self.assertEqual(values["TRUSTED_PROXY_COUNT"], 0)
 
     def test_production_defaults_enable_transport_and_cookie_protection(self):
         values = self.settings_from_environment(DEBUG="False")
@@ -77,3 +84,15 @@ print(json.dumps({name: getattr(settings, name, None) for name in names}))
     def test_debug_mode_does_not_enable_production_security_settings(self):
         values = self.settings_from_environment(DEBUG="True")
         self.assertIsNone(values["SECURE_SSL_REDIRECT"])
+
+    def test_production_rejects_a_weak_secret_key(self):
+        environment = os.environ | {"DEBUG": "False", "SECRET_KEY": "change-me"}
+        result = subprocess.run(
+            [sys.executable, "-c", "from config import settings"],
+            capture_output=True,
+            check=False,
+            env=environment,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("SECRET_KEY", result.stderr)

@@ -64,6 +64,24 @@ class Event(models.Model):
             models.Index(fields=("status", "start_at"), name="event_status_start_idx"),
             models.Index(fields=("organizer", "start_at"), name="event_organizer_start_idx"),
         ]
+        constraints = (
+            models.CheckConstraint(
+                condition=models.Q(end_at__gt=models.F("start_at")),
+                name="event_end_after_start",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(registration_deadline__lte=models.F("start_at")),
+                name="event_deadline_not_after_start",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(capacity__gte=1),
+                name="event_capacity_at_least_one",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(capacity__lte=100000),
+                name="event_capacity_at_most_100000",
+            ),
+        )
 
     registered_total: int
     waitlist_total: int

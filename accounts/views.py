@@ -25,6 +25,7 @@ from accounts.serializers import (
     UserSerializer,
 )
 from config.exceptions import error_response
+from config.net import client_ip
 from config.schema_helpers import BEARER_AUTH
 from config.throttles import ScopedRateThrottle
 
@@ -78,7 +79,7 @@ class LoginView(TokenObtainPairView):
         body.is_valid(raise_exception=True)
         username = body.validated_data["username"]
         password = body.validated_data["password"]
-        address = request.META.get("REMOTE_ADDR", "")
+        address = client_ip(request)
 
         retry_after = blocking_seconds(username, address)
         if retry_after is not None:

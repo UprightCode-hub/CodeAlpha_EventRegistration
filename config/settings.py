@@ -14,8 +14,15 @@ load_dotenv(BASE_DIR / ".env")
 
 ADMIN_URL = normalize_admin_url(os.environ.get("ADMIN_URL", "eventreg-manage/"))
 
-SECRET_KEY = os.environ["SECRET_KEY"]
 DEBUG = os.environ.get("DEBUG", "") == "True"
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if not DEBUG and (
+    len(SECRET_KEY) < 32
+    or any(marker in SECRET_KEY.lower() for marker in ("change-me", "django-insecure"))
+):
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be at least 32 characters and must not use an insecure placeholder."
+    )
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
@@ -26,6 +33,15 @@ ALLOWED_HOSTS = [
 def env_bool(name, default):
     """Read an exact-True environment flag with a safe default."""
     return os.environ.get(name, str(default)) == "True"
+
+
+USE_X_FORWARDED_FOR = env_bool("USE_X_FORWARDED_FOR", False)
+try:
+    TRUSTED_PROXY_COUNT = int(os.environ.get("TRUSTED_PROXY_COUNT", "0"))
+except ValueError as exc:
+    raise ImproperlyConfigured("TRUSTED_PROXY_COUNT must be a non-negative integer.") from exc
+if TRUSTED_PROXY_COUNT < 0:
+    raise ImproperlyConfigured("TRUSTED_PROXY_COUNT must be a non-negative integer.")
 
 
 if not DEBUG:
@@ -70,6 +86,7 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
+    "config.middleware.AdminLoginSecurityMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",

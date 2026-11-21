@@ -8,6 +8,8 @@ from events.models import Event
 class EventAdmin(admin.ModelAdmin):
     """Provides event management with registration totals in the list."""
 
+    readonly_fields = ("capacity", "status", "cancel_reason")
+
     list_display = (
         "title",
         "organizer",

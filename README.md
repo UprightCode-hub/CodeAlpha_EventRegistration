@@ -65,6 +65,8 @@ The exact versions are pinned in `requirements.txt` and `requirements-dev.txt`.
    | `SECRET_KEY` | Django secret key. Required, set your own. | none |
    | `DEBUG` | Debug mode. Only the exact value `True` turns it on. | off |
    | `ALLOWED_HOSTS` | Comma separated host names the server accepts. | `localhost,127.0.0.1` |
+   | `USE_X_FORWARDED_FOR` | Trust `X-Forwarded-For` for client identity only when explicitly enabled behind a trusted proxy. | `False` |
+   | `TRUSTED_PROXY_COUNT` | Number of trusted reverse proxies in the forwarded-address chain. | `0` |
    | `DB_NAME` | PostgreSQL database name. | `eventreg` |
    | `DB_USER` | PostgreSQL user. | `eventreg_user` |
    | `DB_PASSWORD` | PostgreSQL password. | empty |
@@ -76,6 +78,8 @@ The exact versions are pinned in `requirements.txt` and `requirements-dev.txt`.
    | `THROTTLING_ENABLED` | Rate limits. Only the exact value `True` turns them on. | on, except while the tests run |
 
    Use `DEBUG=True` for local work. There is no static file setup, so this project is for local use and is not set up for production.
+
+   `TRUSTED_PROXY_COUNT` counts the proxy addresses listed in `X-Forwarded-For`; the direct connection (`REMOTE_ADDR`) is an extra hop and is not counted.
 
 5. Create the tables:
 
@@ -101,7 +105,7 @@ The Django admin is not at `/admin/`. It is served at the path in `ADMIN_URL`, w
 
 - The value must be one segment of letters, digits, `-` and `_`, and it must not be `admin` in any letter case. A bad value stops the project from starting.
 - `/admin/` and everything under it answer the JSON `not_found` (404), like any unknown URL.
-- This keeps the admin away from scans that only try `/admin/`. It is not access control. Anyone who learns the path sees the same sign in page, and the default value is public in this repository, so set your own value in `.env`. The real protection is a strong superuser password, no weak staff accounts and HTTPS. The admin sign in has no lockout.
+- This keeps the admin away from scans that only try `/admin/`. It is not access control. Anyone who learns the path sees the same sign in page, and the default value is public in this repository, so set your own value in `.env`. The real protection is a strong superuser password, no weak staff accounts, HTTPS and the sign-in lockout.
 
 ## Try it in 2 minutes
 
@@ -346,7 +350,7 @@ Messages are cut to 255 characters. An attendee who cancels gets nothing, and th
 
 ## Sign in lockout
 
-Failed sign ins are limited. Five failures for the same username from the same address, or twenty from one address under any username, in 15 minutes, answer 429 `too_many_attempts` with a `Retry-After` header in seconds. While blocked, the password is not checked, even if it is correct. A successful sign in clears the count for that username and address. A wrong password and an unknown username give the same answer. The register endpoint and the admin sign in are not covered by the lockout. Register has its own rate limit, described next.
+Failed sign ins are limited. Five failures for the same username from the same address, or twenty from one address under any username, in 15 minutes, answer 429 `too_many_attempts` with a `Retry-After` header in seconds. While blocked, the password is not checked, even if it is correct. A successful sign in clears the count for that username and address. A wrong password and an unknown username give the same answer. The API and Django admin sign-ins share this lockout. Register has its own rate limit, described next.
 
 ## Rate limits
 
@@ -472,7 +476,7 @@ python manage.py test --noinput --parallel 4
 
 This runs the tests of all three apps. Without `--parallel` a full run takes several minutes, because passwords are hashed with Argon2 in every test outside the registrations API tests.
 
-The last full run: 505 tests, all passing, with 99 percent line coverage.
+609 tests, 98% coverage (3 skipped, documented as accepted gaps in docs/DECISIONS.md)
 
 ### Code checks
 
